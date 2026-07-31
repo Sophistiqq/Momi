@@ -48,13 +48,13 @@
     } catch { return null; }
   })();
   log('session cookie:', session?.access_token ? 'found' : 'MISSING');
-  if (!session?.access_token) {
-    msg.textContent = 'Sign in on the Moments home screen first, then share again.';
-    bar.style.display = 'none';
-    return;
-  }
 
   (async () => {
+    if (!session?.access_token) {
+      msg.textContent = 'Sign in on the Moments home screen first, then share again.';
+      bar.style.display = 'none';
+      return;
+    }
     try {
       const cache = await caches.open('share-pending');
       const res = await cache.match('/share-pending-' + id);
