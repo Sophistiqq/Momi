@@ -20,6 +20,7 @@
       <a class="btn btn-ghost" href="/">Done</a>
     </div>
   </main>
+  <pre id="dbg" class="dbg"></pre>
 
 <script>
   const id = new URLSearchParams(location.search).get('id');
@@ -27,53 +28,99 @@
   const bar = document.getElementById('bar');
   const cap = document.getElementById('cap');
   const save = document.getElementById('save');
+  const dbg = document.getElementById('dbg');
   let postId;
 
+  function log(...msgs) {
+    const line = '[' + new Date().toLocaleTimeString() + '] ' + msgs.join(' ');
+    console.log(line);
+    dbg.textContent += line + '\n';
+    dbg.scrollTop = dbg.scrollHeight;
+  }
+  log('page loaded, id=' + id, 'url=' + location.href, 'sw=' + (navigator.serviceWorker?.controller?.scriptURL || 'none'), 'v2');
+
+  // The upload needs a valid session; it travels as the sb-auth-token cookie
+  // (same origin), so check it before bothering to compress anything.
+  const session = (() => {
+    try {
+      const m = document.cookie.match(/(?:^|; )sb-auth-token=([^;]*)/);
+      return m ? JSON.parse(decodeURIComponent(m[1])) : null;
+    } catch { return null; }
+  })();
+  log('session cookie:', session?.access_token ? 'found' : 'MISSING');
+  if (!session?.access_token) {
+    msg.textContent = 'Sign in on the Moments home screen first, then share again.';
+    bar.style.display = 'none';
+    return;
+  }
+
   (async () => {
-    const cache = await caches.open('share-pending');
-    const res = await cache.match('/share-pending-' + id);
-    if (!res) {
-      msg.textContent = 'Nothing came through — try sharing again.';
-      return;
-    }
-    const form = await res.formData();
-    await cache.delete('/share-pending-' + id);
-
-    cap.value = form.get('text') ?? '';
-
-    // Compress images before upload: Supabase's on-the-fly resizing is Pro-only,
-    // so shrink client-side (canvas -> JPEG). Faster upload AND faster feed loads.
-    // Videos pass through untouched.
-    const out = new FormData();
-    const photos = form.getAll('photos');
-    const totalBytes = photos.reduce((n, f) => n + f.size, 0);
-    for (const file of photos) {
-      out.append('photos', (await compress(file)) ?? file);
-    }
-
-    // XHR gives upload progress; fetch doesn't.
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/share-target');
-    xhr.setRequestHeader('Accept', 'application/json');
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        bar.style.width = Math.round((e.loaded / e.total) * 100) + '%';
+    try {
+      const cache = await caches.open('share-pending');
+      const res = await cache.match('/share-pending-' + id);
+      log('cache entry:', res ? 'found' : 'MISSING');
+      if (!res) {
+        msg.textContent = 'Nothing came through — try sharing again.';
+        return;
       }
-    };
-    xhr.onload = () => {
-      let data = {};
-      try { data = JSON.parse(xhr.responseText); } catch {}
-      if (xhr.status === 200 && data.postId) {
-        postId = data.postId;
-        bar.style.width = '100%';
-        msg.textContent = 'Uploaded — add a caption?';
-        save.disabled = false;
-      } else {
-        msg.textContent = 'Upload failed — try sharing again.';
+      const form = await res.formData();
+      await cache.delete('/share-pending-' + id);
+      log('form parsed:', form.getAll('photos').map((f) => f.name + ' (' + f.size + 'B)').join(', ') || 'no files');
+
+      cap.value = form.get('text') ?? '';
+
+      // Compress images before upload: Supabase's on-the-fly resizing is Pro-only,
+      // so shrink client-side (canvas -> JPEG). Faster upload AND faster feed loads.
+      // Videos pass through untouched.
+      const out = new FormData();
+      const photos = form.getAll('photos');
+      for (const file of photos) {
+        const c = await compress(file);
+        out.append('photos', c ?? file);
+        log('compressed', file.name, '->', (c ? c.size : file.size) + 'B');
       }
-    };
-    xhr.onerror = () => { msg.textContent = 'Upload failed — check your connection.'; };
-    xhr.send(out);
+
+      // XHR gives upload progress; fetch doesn't.
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/share-target');
+      xhr.setRequestHeader('Accept', 'application/json');
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          bar.style.width = Math.round((e.loaded / e.total) * 100) + '%';
+          log('progress', Math.round((e.loaded / e.total) * 100) + '%');
+        }
+      };
+      xhr.onload = () => {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText); } catch {}
+        log('response', xhr.status, xhr.responseText.slice(0, 200));
+        if (xhr.status === 200 && data.postId) {
+          postId = data.postId;
+          bar.style.width = '100%';
+          msg.textContent = 'Uploaded — add a caption?';
+          save.disabled = false;
+        } else if (xhr.status === 401) {
+          msg.textContent = 'Session expired — sign in on the Moments home screen, then share again.';
+        } else {
+          msg.textContent = 'Upload failed — try sharing again.';
+        }
+      };
+      xhr.onerror = () => {
+        log('network error');
+        msg.textContent = 'Upload failed — check your connection.';
+      };
+      xhr.timeout = 120000;
+      xhr.ontimeout = () => {
+        log('timed out');
+        msg.textContent = 'Upload timed out — try sharing again.';
+      };
+      xhr.send(out);
+      log('XHR sent');
+    } catch (e) {
+      console.error('caption upload failed:', e);
+      log('THREW:', e && e.message ? e.message : e);
+      msg.textContent = 'Something went wrong: ' + ((e && e.message) || e);
+    }
   })();
 
   // Resize image to at most MAX_W wide (keeps aspect), re-encode as JPEG.

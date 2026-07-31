@@ -1,4 +1,4 @@
-const CACHE = 'moments-shell';
+const CACHE = 'moments-shell-v2'; // bump to invalidate every phone's cached shell
 const SHELL = ['/', '/manifest.json', '/caption', '/style.css'];
 
 self.addEventListener('install', (event) => {
@@ -61,9 +61,13 @@ self.addEventListener('fetch', (event) => {
 });
 
 async function handleShare(request) {
-  const form = await request.formData();
+  // Cache the raw request bytes, NOT request.formData(): formData() returns
+  // stream-backed files that serialize empty into the cache, so a later
+  // re-upload sends a bodiless multipart and the function hangs forever.
+  const contentType = request.headers.get('content-type') || 'multipart/form-data';
+  const body = await request.arrayBuffer();
   const id = crypto.randomUUID();
   const cache = await caches.open('share-pending');
-  await cache.put('/share-pending-' + id, new Response(form));
+  await cache.put('/share-pending-' + id, new Response(body, { headers: { 'Content-Type': contentType } }));
   return Response.redirect(`/caption?id=${id}`, 303);
 }

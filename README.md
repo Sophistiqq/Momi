@@ -56,6 +56,19 @@ Everything lives on Supabase's free tier — no server to run:
    proxies the request to your Supabase function. Redeploy after the secret is
    set. The share target only appears in Android's share sheet once the site is
    served over HTTPS with a real domain.
+5. Enable Google sign-in:
+   - Google Cloud Console → create an OAuth client ID (Web application)
+     with redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`.
+   - Supabase dashboard → Authentication → Providers → Google → paste the
+     Client ID and Secret. Also set the Site URL to your pages.dev domain
+     (Authentication → URL Configuration).
+   - Then deploy the auth migration and function:
+   ```bash
+   supabase db push
+   supabase functions deploy share-target
+   ```
+   (The function requires a signed-in session; redeploying the PWA without
+   the function gives you a feed that 401s.)
 
 ## Known gaps
 
@@ -73,6 +86,14 @@ Everything lives on Supabase's free tier — no server to run:
   or add signed URLs).
 - The auto-styling pass — flip `status` to `styled` and populate
   `style_json` once you're ready to build it.
-- Auth: right now `/share-target` and `/posts/*` are open (the function uses
-  the service-role key). Fine for a private journal, but worth a shared
-  secret header before this is reachable from the open internet.
+- Auth: sign-in is required for everything. The PWA signs in with Google
+  (Supabase Auth); the session lives in a cookie so the share-sheet
+  navigation and caption page can send it. The edge function rejects every
+  request without a valid session, and RLS blocks direct PostgREST reads
+  with the anon key. Anyone with a Google account can sign in; to lock it
+  to just the two of you: Supabase dashboard → Authentication → Providers →
+  Google → turn off "Allow new users to sign up" after both accounts exist
+  (existing sessions stay valid).
+- Media stays in a public bucket: the feed loads storage URLs directly. Object
+  keys are random UUIDs (unguessable), fine for a private journal. Making the
+  bucket private needs signed URLs everywhere — not worth it.

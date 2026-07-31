@@ -17,6 +17,17 @@ export default {
       });
     }
 
+    // sw.js must never sit in a browser cache: the service worker only
+    // updates when the browser fetches a fresh script, and Cloudflare
+    // Pages' default 7-day asset cache would keep phones on the old SW.
+    if (url.pathname === '/sw.js') {
+      const res = await env.ASSETS.fetch(request);
+      return new Response(res.body, {
+        status: res.status,
+        headers: { ...Object.fromEntries(res.headers), 'Cache-Control': 'no-store' },
+      });
+    }
+
     // Everything else: serve static assets from the Pages site.
     return env.ASSETS.fetch(request);
   },

@@ -9,13 +9,15 @@
 <style>html { background: #09090b; }</style>
 <link rel="stylesheet" href="/style.css" />
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body x-data="feed" x-init="init()">
 
-<header class="topbar">
+<header class="topbar" x-show="user">
   <h1 class="logo logo-lg">Moments</h1>
   <div class="topbar-right">
     <span class="count" x-text="countText"></span>
+    <button class="btn btn-ghost" @click="signOut()" aria-label="Sign out">Sign out</button>
     <button class="icon-btn" @click="init()" :disabled="loading" aria-label="Refresh">
       <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
            stroke-width="1.5" stroke-linecap="round" :class="{ 'spin': loading }">
@@ -24,8 +26,23 @@
     </button>
   </div>
 </header>
+<!-- Sign-in card: Google OAuth, PKCE redirect back to the app -->
+<div class="state login" :class="{ 'show': !user }">
+  <h1 class="logo">Moments</h1>
+  <p>Sign in to see your moments.</p>
+  <button class="btn btn-google" @click="googleSignIn()" :disabled="signingIn">
+    <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
+      <path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.3 6.1 29.4 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/>
+      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3l5.7-5.7C34.3 6.1 29.4 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+      <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+      <path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.7l6.2 5.2C36.9 40.2 44 35 44 24c0-1.3-.1-2.6-.4-3.9z"/>
+    </svg>
+    <span x-text="signingIn ? 'Redirecting…' : 'Sign in with Google'"></span>
+  </button>
+  <p class="auth-error" x-show="authError" x-text="authError"></p>
+</div>
 
-<main>
+<main x-show="user">
   <div class="state" :class="{ 'show': loading }">
     <h2>Loading…</h2>
   </div>
@@ -65,7 +82,7 @@
 </main>
 
 <!-- Post viewer: full screen on mobile, side-by-side on desktop -->
-<div class="viewer" :class="{ 'open': activePost }" @keydown.escape.window="activePost = null">
+<div class="viewer" x-show="user" :class="{ 'open': activePost }" @keydown.escape.window="activePost = null">
   <div class="viewer-backdrop" @click="activePost = null"></div>
   <template x-if="activePost">
     <div class="viewer-panel">
@@ -149,6 +166,51 @@
 </div>
 
 <script>
+  // Session lives in a cookie (not localStorage) because the Android share
+  // sheet and the caption page's XHR are plain navigations/fetches that can't
+  // attach an Authorization header — cookies ride along. The edge function
+  // reads the same cookie and rejects requests without a valid session.
+  const cookieStorage = {
+    getItem(key) {
+      const m = document.cookie.match(new RegExp('(?:^|; )' + key + '=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : null;
+    },
+    setItem(key, value) {
+      // Slim sessions to tokens only: the full session (with Google user
+      // metadata) exceeds Chrome's ~4KB cookie limit and gets silently
+      // dropped. PKCE code verifiers must pass through untouched — they have
+      // no access_token, and stripping them breaks the OAuth exchange.
+      try {
+        const s = JSON.parse(value);
+        if (s?.access_token) {
+          value = JSON.stringify({
+            access_token: s.access_token,
+            refresh_token: s.refresh_token,
+            expires_at: s.expires_at,
+            token_type: s.token_type,
+          });
+        }
+      } catch {}
+      document.cookie = key + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000; SameSite=Lax; Secure';
+    },
+    removeItem(key) {
+      document.cookie = key + '=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    },
+  };
+
+  const authClient = supabase.createClient(
+    'https://wmouyojmcelxgkwjfpxz.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indtb3V5b2ptY2VseGdrd2pmcHh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0NjA5MTEsImV4cCI6MjEwMTAzNjkxMX0.PRuJlyXfuCTmtUXf3MLwNdRs8JcFJpZ0Y4DDL3Hz_m8',
+    {
+      auth: {
+        storageKey: 'sb-auth-token',
+        storage: cookieStorage,
+        persistSession: true,
+        flowType: 'pkce',
+      },
+    },
+  );
+
   function feed() {
     return {
       posts: [],
@@ -163,6 +225,9 @@
       commenting: false,
       editingCaption: false,
       captionDraft: '',
+      user: null,
+      signingIn: false,
+      authError: '',
 
       get media() {
         return (this.activePost?.post_media || [])[this.mediaIndex] || null;
@@ -189,6 +254,23 @@
       },
 
       async init() {
+        const { data } = await authClient.auth.getSession();
+        // The cookie holds tokens only (user object was slimmed to fit the
+        // cookie size limit) and we never display user details, so presence
+        // is enough — no getUser() round trip, no login-screen flash.
+        this.user = data.session ? (data.session.user ?? true) : null;
+        if (this.user) await this.load();
+        // Google's redirect lands back on this page with a PKCE code; the
+        // exchange happens after init, so this picks up the resulting session.
+        authClient.auth.onAuthStateChange((_event, session) => {
+          if (session?.user && !this.user) {
+            this.user = session.user;
+            this.load();
+          }
+        });
+      },
+
+      async load() {
         this.loading = true;
         this.error = false;
         try {
@@ -202,7 +284,26 @@
         }
       },
 
+      async googleSignIn() {
+        this.authError = '';
+        this.signingIn = true;
+        const { error } = await authClient.auth.signInWithOAuth({
+          provider: 'google',
+          options: { redirectTo: location.origin },
+        });
+        this.signingIn = false;
+        if (error) this.authError = error.message;
+      },
+
+      async signOut() {
+        await authClient.auth.signOut();
+        this.user = null;
+        this.posts = [];
+        this.activePost = null;
+      },
+
       async openPost(post) {
+        if (!this.user) return;
         this.activePost = post;
         this.mediaIndex = 0;
         this.fitMode = false;

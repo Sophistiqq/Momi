@@ -95,6 +95,19 @@ main { max-width: 1240px; margin: 0 auto; padding-bottom: 48px; }
 .state p { color: var(--muted); font-size: .92rem; line-height: 1.5; max-width: 340px; }
 .state .btn { margin-top: 8px; }
 
+/* ---- Sign-in ---- */
+.state.login { gap: 14px; padding-top: 20vh; }
+.state.login .logo { font-size: 1.6rem; }
+.btn-google {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: #fff; color: #1f1f1f;
+  padding: 10px 20px; border-radius: var(--radius-md); font-size: .95rem; font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+}
+.btn-google:hover { filter: brightness(.96); }
+.btn-google:disabled { opacity: .6; pointer-events: none; }
+.auth-error { color: #e06c6c; font-size: .85rem; }
+
 /* ---- Post viewer (full screen) ---- */
 .viewer { position: fixed; inset: 0; z-index: 50; display: none; background: rgba(0, 0, 0, .9); }
 .viewer.open { display: flex; align-items: center; justify-content: center; }
@@ -161,6 +174,17 @@ main { max-width: 1240px; margin: 0 auto; padding-bottom: 48px; }
 .cap-card textarea.input { min-height: 90px; text-align: left; }
 .cap-actions { display: flex; gap: 10px; margin-top: 16px; }
 .cap-actions .btn { flex: 1; }
+
+/* ---- Caption page debug log ---- */
+.dbg {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  max-height: 40vh; overflow-y: auto;
+  margin: 0; padding: 8px 12px;
+  background: rgba(0, 0, 0, .85); color: #9f9aa6;
+  font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-all;
+  z-index: 100; text-align: left;
+}
 
 /* ---- Desktop: side-by-side viewer ---- */
 @media (min-width: 768px) {

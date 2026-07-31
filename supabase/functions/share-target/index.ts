@@ -5,10 +5,22 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 );
 
+// Anon-key client: used only to validate the caller's session (service role
+// can't call getUser as a user). The session arrives via the sb-auth-token
+// cookie, because the Android share-sheet POST and the caption page's XHR
+// can't attach an Authorization header.
+const anon = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_ANON_KEY')!,
+);
+
 const BUCKET = Deno.env.get('MOMENTS_BUCKET') ?? 'moments';
+const TOKEN_COOKIE = 'sb-auth-token';
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
+
+  if (!(await getUser(req))) return unauthorized(req);
 
   // Android's share sheet does a real browser navigation: POST multipart/form-data
   // straight to this URL. We store the files, create a "pending_style" post,
@@ -38,6 +50,40 @@ Deno.serve(async (req) => {
 
   return new Response('Not found', { status: 404 });
 });
+
+// Extract the access_token from the session cookie and verify it against
+// Supabase Auth. Returns null (-> 401) for missing, malformed, or stale
+// sessions. Service-role writes below are fine because the caller is proven
+// to be a signed-in user of this project.
+async function getUser(req: Request) {
+  const m = req.headers.get('cookie')?.match(new RegExp(`(?:^|;\\s*)${TOKEN_COOKIE}=([^;]*)`));
+  if (!m) return null;
+  try {
+    const token = JSON.parse(decodeURIComponent(m[1]))?.access_token;
+    if (!token) return null;
+    const { data, error } = await anon.auth.getUser(token);
+    return error ? null : data.user;
+  } catch {
+    return null;
+  }
+}
+
+function unauthorized(req: Request): Response {
+  if ((req.headers.get('accept') ?? '').includes('application/json')) {
+    return Response.json({ error: 'unauthorized' }, { status: 401 });
+  }
+  return new Response(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Moments</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background:#1b1622; color:#f2ece5;
+    display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; padding:24px; text-align:center; }
+  a { color:#d4a574; font-weight:600; }
+</style></head>
+<body>
+  <p>Sign in on the Moments home screen first, then share again. <a href="/">Open Moments</a> · auth-v2</p>
+</body></html>`, { status: 401, headers: { 'Content-Type': 'text/html' } });
+}
 
 async function handleShare(req: Request): Promise<Response> {
   const form = await req.formData();
