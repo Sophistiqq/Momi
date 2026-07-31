@@ -1,0 +1,74 @@
+# Moments — upload layer
+
+Scope: just the capture-to-storage pipeline. Auto-styling is intentionally
+deferred — posts land with `status = 'pending_style'` and a `style_json`
+column that's `NULL` until you build that pass.
+
+## How it works
+
+1. Both phones install the PWA (Chrome → "Add to Home screen"). This requires
+   the site served over HTTPS with `manifest.json` + a registered service
+   worker — both are in `pwa/`.
+2. `manifest.json` registers Moments as an Android **share target** for
+   `image/*` and `video/*`. Its `action` points at a Supabase Edge Function.
+3. From the gallery: Share → Moments. Android does a real POST navigation
+   (multipart/form-data) straight to the Edge Function — no client JS needed
+   to catch it.
+4. The function stores each file in Supabase Storage, inserts a `posts` row
+   and one `post_media` row per file, and responds with a tiny confirmation
+   page where you can immediately fix the caption.
+
+Everything lives on Supabase's free tier — no server to run:
+
+- **Supabase Edge Function** (`supabase/functions/share-target`) — receives the
+  share POST, uploads to Storage, writes Postgres rows, returns the caption
+  page. Also serves `PATCH /posts/:id/caption` and `GET /posts`.
+- **Supabase Postgres** — `posts` and `post_media` tables (schema in
+  `supabase/migrations/`).
+- **Supabase Storage** — the `moments` bucket holds the files (object_key is
+  the path in the bucket).
+- **Cloudflare Pages** — hosts the `pwa/` static files for free with a real
+  HTTPS cert, which is what makes the install prompt + share sheet work.
+
+## Setup
+
+1. Create a free project at [supabase.com](https://supabase.com). Note the
+   project ref (the part before `.supabase.co`).
+2. Install the Supabase CLI and link it:
+   ```bash
+   supabase link --project-ref <your-ref>
+   supabase db push
+   supabase secrets set MOMENTS_BUCKET=moments
+   ```
+   (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically.)
+3. Deploy the function:
+   ```bash
+   supabase functions deploy share-target
+   ```
+4. Deploy `pwa/` to Cloudflare Pages (free). The share target's `action` must
+   be **same-origin** as the manifest (Chrome rejects cross-origin actions), so
+   it stays `/share-target` and a Pages Function (`pwa/functions/share-target/`)
+   proxies the request to your Supabase function. Set the `SUPABASE_ANON_KEY`
+   env var in Cloudflare Pages (Settings → Environment variables) so the proxy
+   can authenticate. Redeploy. The share target only appears in Android's share
+   sheet once the site is served over HTTPS with a real domain.
+
+## Known gaps
+
+- iOS isn't handled — Safari doesn't support the Web Share Target API. Since
+  you're both on Android this is out of scope for now. If that changes: an iOS
+  Shortcut hitting the function URL directly, or a real Share Extension.
+- Photos/videos route through the Edge Function, which has a 256MB memory
+  limit — a single share should stay well under ~100MB or it may time out.
+- Storage free tier allows 50MB per file upload.
+
+## Next steps (not built yet)
+
+- A feed page that reads `GET /posts` and renders the media (public URLs via
+  `storage.from('moments').getPublicUrl(key)` — set the bucket to public-read,
+  or add signed URLs).
+- The auto-styling pass — flip `status` to `styled` and populate
+  `style_json` once you're ready to build it.
+- Auth: right now `/share-target` and `/posts/*` are open (the function uses
+  the service-role key). Fine for a private journal, but worth a shared
+  secret header before this is reachable from the open internet.

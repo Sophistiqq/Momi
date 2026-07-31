@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Moments</title>
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#1b1622" />
+<style>
+  :root {
+    --bg: #1b1622;
+    --surface: #241d2e;
+    --text: #f2ece5;
+    --muted: #a89bb0;
+    --accent: #d4a574;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Georgia, 'Iowan Old Style', serif;
+    text-align: center;
+    padding: 32px;
+  }
+  h1 {
+    font-size: 2rem;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    margin: 0 0 8px;
+  }
+  p {
+    font-family: -apple-system, system-ui, sans-serif;
+    color: var(--muted);
+    font-size: 0.95rem;
+    line-height: 1.5;
+    max-width: 320px;
+    margin: 0 0 28px;
+  }
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    text-align: left;
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 20px 24px;
+    max-width: 320px;
+    font-family: -apple-system, system-ui, sans-serif;
+    font-size: 0.9rem;
+  }
+  .steps div { display: flex; gap: 10px; align-items: flex-start; }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    margin-top: 7px; flex-shrink: 0;
+  }
+  .install-hint {
+    margin-top: 24px;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <h1>Moments</h1>
+  <p>A quiet, shared place for the two of you. Once installed, send photos here straight from your gallery.</p>
+  <div class="steps">
+    <div><span class="dot"></span>Open your Photos app</div>
+    <div><span class="dot"></span>Select a photo or a few</div>
+    <div><span class="dot"></span>Tap Share &rarr; Moments</div>
+  </div>
+  <p class="install-hint">Chrome menu &rarr; "Add to Home screen" to install.</p>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js');
+  }
+</script>
+</body>
+</html>
