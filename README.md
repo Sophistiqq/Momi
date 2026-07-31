@@ -45,13 +45,17 @@ Everything lives on Supabase's free tier — no server to run:
    ```bash
    supabase functions deploy share-target
    ```
-4. Deploy `pwa/` to Cloudflare Pages (free). The share target's `action` must
-   be **same-origin** as the manifest (Chrome rejects cross-origin actions), so
-   it stays `/share-target` and a Pages Function (`pwa/functions/share-target/`)
-   proxies the request to your Supabase function. Set the `SUPABASE_ANON_KEY`
-   env var in Cloudflare Pages (Settings → Environment variables) so the proxy
-   can authenticate. Redeploy. The share target only appears in Android's share
-   sheet once the site is served over HTTPS with a real domain.
+4. Deploy `pwa/` to Cloudflare Pages with `wrangler` (not drag-drop — the
+   proxy worker is skipped by the drag-drop uploader):
+   ```bash
+   npx wrangler pages deploy pwa --project-name <your-project>
+   echo "<anon-key>" | npx wrangler pages secret put SUPABASE_ANON_KEY --project-name <your-project>
+   ```
+   The share target's `action` must be **same-origin** as the manifest (Chrome
+   rejects cross-origin actions), so it stays `/share-target` and `pwa/_worker.js`
+   proxies the request to your Supabase function. Redeploy after the secret is
+   set. The share target only appears in Android's share sheet once the site is
+   served over HTTPS with a real domain.
 
 ## Known gaps
 

@@ -17,5 +17,5 @@ create table if not exists post_media (
 );
 
 insert into storage.buckets (id, name, public)
-values ('moments', 'moments', false)
-on conflict (id) do nothing;
+values ('moments', 'moments', true)
+on conflict (id) do update set public = true;

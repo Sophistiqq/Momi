@@ -1,86 +1,267 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Moments</title>
 <link rel="manifest" href="/manifest.json" />
 <meta name="theme-color" content="#1b1622" />
+<link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
 <style>
-  :root {
-    --bg: #1b1622;
-    --surface: #241d2e;
-    --text: #f2ece5;
-    --muted: #a89bb0;
-    --accent: #d4a574;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg);
-    color: var(--text);
-    font-family: Georgia, 'Iowan Old Style', serif;
-    text-align: center;
-    padding: 32px;
-  }
-  h1 {
-    font-size: 2rem;
-    font-weight: 400;
-    letter-spacing: 0.02em;
-    margin: 0 0 8px;
-  }
-  p {
-    font-family: -apple-system, system-ui, sans-serif;
-    color: var(--muted);
-    font-size: 0.95rem;
-    line-height: 1.5;
-    max-width: 320px;
-    margin: 0 0 28px;
-  }
-  .steps {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    text-align: left;
-    background: var(--surface);
-    border-radius: 14px;
-    padding: 20px 24px;
-    max-width: 320px;
-    font-family: -apple-system, system-ui, sans-serif;
-    font-size: 0.9rem;
-  }
-  .steps div { display: flex; gap: 10px; align-items: flex-start; }
-  .dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--accent);
-    margin-top: 7px; flex-shrink: 0;
-  }
-  .install-hint {
-    margin-top: 24px;
-    font-size: 0.8rem;
-    color: var(--muted);
-  }
+  html { background: #1b1622; }
+  .card-media { aspect-ratio: 4 / 3; object-fit: cover; width: 100%; }
+  .carousel-media { max-height: 42vh; width: 100%; object-fit: contain; background: #000; }
+  .media-stage { touch-action: pan-y; }
 </style>
 </head>
-<body>
-  <h1>Moments</h1>
-  <p>A quiet, shared place for the two of you. Once installed, send photos here straight from your gallery.</p>
-  <div class="steps">
-    <div><span class="dot"></span>Open your Photos app</div>
-    <div><span class="dot"></span>Select a photo or a few</div>
-    <div><span class="dot"></span>Tap Share &rarr; Moments</div>
+<body class="min-h-screen" x-data="feed" x-init="init()">
+  <div class="max-w-5xl mx-auto px-4 py-6">
+    <header class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-serif tracking-wide">Moments</h1>
+      <div class="flex gap-2">
+        <button class="btn btn-sm btn-ghost" @click="init()" :class="{ 'loading': loading }">↻</button>
+        <span class="text-sm opacity-60" x-text="countText"></span>
+      </div>
+    </header>
+
+    <!-- Empty / loading states -->
+    <div x-show="loading" class="flex justify-center py-24">
+      <span class="loading loading-spinner loading-lg text-warning"></span>
+    </div>
+    <div x-show="!loading && error" class="alert alert-error">
+      <span>Couldn&rsquo;t load. Check your connection.</span>
+    </div>
+    <div x-show="!loading && !error && posts.length === 0" class="text-center py-24 opacity-70">
+      <p class="text-lg mb-2">Nothing here yet.</p>
+      <p class="text-sm">Share a photo from your gallery &rarr; Moments</p>
+    </div>
+
+    <!-- Feed grid -->
+    <div x-show="!loading && !error && posts.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+      <template x-for="post in posts" :key="post.id">
+        <button class="card bg-base-200 overflow-hidden rounded-xl p-0 text-left cursor-pointer hover:opacity-90 transition"
+                @click="openPost(post)">
+          <template x-if="post.post_media && post.post_media.length">
+            <img class="card-media"
+                 :src="post.post_media[0].url"
+                 :alt="post.caption || ''"
+                 loading="lazy"
+                 :class="{ 'aspect-auto': post.post_media[0].mime_type.startsWith('video') }" />
+          </template>
+          <div class="p-2 text-xs">
+            <p x-show="post.caption" class="truncate opacity-90" x-text="post.caption"></p>
+            <p x-show="!post.caption" class="opacity-50 italic">No caption</p>
+          </div>
+        </button>
+      </template>
+    </div>
   </div>
-  <p class="install-hint">Chrome menu &rarr; "Add to Home screen" to install.</p>
+
+  <!-- Post detail modal -->
+  <div class="modal" :class="{ 'modal-open': activePost }" @keydown.escape.window="activePost = null">
+    <div class="modal-box max-w-3xl p-0 overflow-hidden">
+      <template x-if="activePost">
+        <div class="flex flex-col max-h-[85vh]">
+          <div class="flex items-center justify-between px-4 py-3 border-b border-base-300">
+            <p class="text-xs opacity-70" x-text="formatDate(activePost.created_at)"></p>
+            <button class="btn btn-sm btn-ghost" @click="activePost = null">✕</button>
+          </div>
+
+          <div class="overflow-y-auto flex-1">
+            <!-- Media: swipeable carousel, one item at a time (Instagram-style) -->
+            <div x-show="activePost.post_media && activePost.post_media.length" class="relative">
+              <div class="media-stage flex items-center justify-center bg-black cursor-pointer"
+                   @click="openComments()"
+                   @touchstart.passive="touchX = $event.touches[0].clientX"
+                   @touchend.passive="swipe($event.changedTouches[0].clientX - touchX)">
+                <template x-if="media && media.mime_type.startsWith('video')">
+                  <video class="carousel-media" controls preload="metadata" :src="media.url"
+                         @click.stop></video>
+                </template>
+                <template x-if="media && !media.mime_type.startsWith('video')">
+                  <img class="carousel-media" :src="media.url" :alt="activePost.caption || ''" />
+                </template>
+              </div>
+              <!-- Dots -->
+              <div x-show="activePost.post_media && activePost.post_media.length > 1"
+                   class="absolute bottom-2 inset-x-0 flex justify-center gap-1.5">
+                <template x-for="(m, i) in activePost.post_media" :key="i">
+                  <button class="w-1.5 h-1.5 rounded-full transition"
+                          :class="i === mediaIndex ? 'bg-primary scale-125' : 'bg-base-100/50'"
+                          @click="mediaIndex = i"></button>
+                </template>
+              </div>
+            </div>
+
+            <!-- Caption -->
+            <div class="px-4 py-3">
+              <template x-if="!editingCaption">
+                <div class="flex justify-between items-start gap-3">
+                  <p x-show="activePost.caption" class="text-sm leading-relaxed" x-text="activePost.caption"></p>
+                  <p x-show="!activePost.caption" class="text-sm opacity-50 italic">No caption</p>
+                  <button class="btn btn-xs btn-ghost shrink-0" @click="startEditCaption()">Edit</button>
+                </div>
+              </template>
+              <template x-if="editingCaption">
+                <div class="flex gap-2">
+                  <input class="input input-bordered input-sm flex-1" x-model="captionDraft"
+                         placeholder="Add a caption…" @keydown.enter="saveCaption()" />
+                  <button class="btn btn-sm btn-primary" @click="saveCaption()">Save</button>
+                </div>
+              </template>
+            </div>
+
+            <!-- Comments -->
+            <div class="px-4 pb-4">
+              <p class="text-xs uppercase tracking-wide opacity-60 mb-2">Comments</p>
+              <div x-show="comments.length === 0" class="text-xs opacity-50 italic mb-2">
+                No comments yet.
+              </div>
+              <div x-show="comments.length" class="space-y-2 mb-3">
+                <template x-for="c in comments" :key="c.id">
+                  <div class="bg-base-300 rounded-lg px-3 py-2">
+                    <div class="flex justify-between items-baseline gap-2">
+                      <span class="text-xs font-semibold text-warning" x-text="c.author || 'Anonymous'"></span>
+                      <span class="text-[10px] opacity-50" x-text="formatDate(c.created_at)"></span>
+                    </div>
+                    <p class="text-sm mt-1" x-text="c.body"></p>
+                  </div>
+                </template>
+              </div>
+
+              <div class="flex gap-2">
+                <input class="input input-bordered input-sm flex-1" x-model="newComment"
+                       placeholder="Write a comment…" @keydown.enter="addComment()"
+                       :disabled="commenting" />
+                <button class="btn btn-sm btn-primary" @click="addComment()"
+                        :disabled="commenting || !newComment.trim()"
+                        :class="{ 'loading': commenting }">Send</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+    <div class="modal-backdrop" @click="activePost = null"></div>
+  </div>
 
 <script>
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js');
+  function feed() {
+    return {
+      posts: [],
+      loading: true,
+      error: false,
+      activePost: null,
+      mediaIndex: 0,
+      touchX: 0,
+      comments: [],
+      newComment: '',
+      commenting: false,
+      editingCaption: false,
+      captionDraft: '',
+
+      get media() {
+        return (this.activePost?.post_media || [])[this.mediaIndex] || null;
+      },
+
+      get countText() {
+        return this.posts.length ? `${this.posts.length} moment${this.posts.length > 1 ? 's' : ''}` : '';
+      },
+
+      async init() {
+        this.loading = true;
+        this.error = false;
+        try {
+          const res = await fetch('/share-target/posts');
+          if (!res.ok) throw new Error(res.status);
+          this.posts = await res.json();
+        } catch (e) {
+          this.error = true;
+        } finally {
+          this.loading = false;
+        }
+      },
+
+      async openPost(post) {
+        this.activePost = post;
+        this.mediaIndex = 0;
+        this.comments = [];
+        this.editingCaption = false;
+        try {
+          const res = await fetch(`/share-target/posts/${post.id}/comments`);
+          if (res.ok) this.comments = await res.json();
+        } catch (e) {}
+      },
+
+      // Tap on media jumps straight to the comments.
+      openComments() {
+        document.querySelector('.modal-box .overflow-y-auto')?.scrollTo({ top: 99999, behavior: 'smooth' });
+      },
+
+      swipe(dx) {
+        const n = this.activePost.post_media.length;
+        if (Math.abs(dx) < 40) return;
+        if (dx < 0) this.mediaIndex = Math.min(n - 1, this.mediaIndex + 1);
+        else this.mediaIndex = Math.max(0, this.mediaIndex - 1);
+      },
+
+      startEditCaption() {
+        this.captionDraft = this.activePost.caption || '';
+        this.editingCaption = true;
+      },
+
+      async saveCaption() {
+        const post = this.activePost;
+        try {
+          await fetch(`/share-target/posts/${post.id}/caption`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ caption: this.captionDraft.trim() }),
+          });
+          post.caption = this.captionDraft.trim();
+        } catch (e) {}
+        this.editingCaption = false;
+      },
+
+      async addComment() {
+        const body = this.newComment.trim();
+        if (!body || this.commenting) return;
+        this.commenting = true;
+        try {
+          const res = await fetch(`/share-target/posts/${this.activePost.id}/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body }),
+          });
+          if (res.ok) {
+            this.comments.push({ id: Date.now().toString(), author: '', body, created_at: new Date().toISOString() });
+            this.newComment = '';
+          }
+        } catch (e) {}
+        this.commenting = false;
+      },
+
+      formatDate(s) {
+        return new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      },
+    };
   }
+
+  // Register the service worker so browsers pick up new versions automatically.
+  // The SW calls skipWaiting() on install + clients.claim() on activate, so a
+  // new deploy activates immediately; this reloads once to drop the old page.
+  (() => {
+    if (!('serviceWorker' in navigator)) return;
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) return;
+      refreshing = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register('/sw.js');
+  })();
 </script>
 </body>
 </html>

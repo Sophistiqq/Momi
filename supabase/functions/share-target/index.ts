@@ -23,6 +23,15 @@ Deno.serve(async (req) => {
     return handleCaption(req, captionMatch[1]);
   }
 
+  // Comments on a post.
+  const commentsMatch = url.pathname.match(/\/share-target\/posts\/([^/]+)\/comments$/);
+  if (req.method === 'GET' && commentsMatch) {
+    return handleComments(commentsMatch[1]);
+  }
+  if (req.method === 'POST' && commentsMatch) {
+    return handleAddComment(req, commentsMatch[1]);
+  }
+
   if (req.method === 'GET' && url.pathname.endsWith('/share-target/posts')) {
     return handleList();
   }
@@ -71,6 +80,11 @@ async function handleShare(req: Request): Promise<Response> {
     if (mediaErr) throw mediaErr;
   }
 
+  // The PWA's caption page uploads in the background via XHR and wants JSON
+  // back; a direct share-sheet navigation gets the HTML confirmation page.
+  if (req.headers.get('accept')?.includes('application/json')) {
+    return Response.json({ ok: true, postId, count: files.length });
+  }
   return renderPage(`Saved ${files.length} item(s).`, postId, text);
 }
 
@@ -84,14 +98,47 @@ async function handleCaption(req: Request, postId: string): Promise<Response> {
   return Response.json({ ok: true });
 }
 
+async function handleComments(postId: string): Promise<Response> {
+  const { data, error } = await supabase
+    .from('comments')
+    .select('*')
+    .eq('post_id', postId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return Response.json(data ?? []);
+}
+
+async function handleAddComment(req: Request, postId: string): Promise<Response> {
+  const { author, body } = await req.json();
+  if (!body || !body.trim()) {
+    return Response.json({ error: 'comment body required' }, { status: 400 });
+  }
+  const { error } = await supabase.from('comments').insert({
+    id: crypto.randomUUID(),
+    post_id: postId,
+    author: (author ?? '').trim(),
+    body: body.trim(),
+  });
+  if (error) throw error;
+  return Response.json({ ok: true });
+}
+
 async function handleList(): Promise<Response> {
   const { data, error } = await supabase
     .from('posts')
-    .select('*')
+    .select('id, caption, created_at, status, post_media(id, object_key, mime_type, sort_order)')
     .order('created_at', { ascending: false })
     .limit(50);
   if (error) throw error;
-  return Response.json(data);
+
+  const rows = (data ?? []).map((post) => ({
+    ...post,
+    post_media: (post.post_media ?? []).map((m) => ({
+      ...m,
+      url: `https://wmouyojmcelxgkwjfpxz.supabase.co/storage/v1/object/public/moments/${m.object_key}`,
+    })),
+  }));
+  return Response.json(rows);
 }
 
 function renderPage(message: string, postId?: string, caption = ''): Response {

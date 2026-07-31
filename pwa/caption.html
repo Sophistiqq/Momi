@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Moments</title>
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#1b1622" />
+<style>
+  :root { --bg:#1b1622; --surface:#241d2e; --text:#f2ece5; --muted:#a89bb0; --accent:#d4a574; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; background: var(--bg);
+    color: var(--text); font-family: Georgia, 'Iowan Old Style', serif;
+    text-align: center; padding: 32px;
+  }
+  p.msg { color: var(--accent); margin: 0 0 20px; font-family: -apple-system, system-ui, sans-serif; }
+  .bar-wrap {
+    width: 100%; max-width: 320px; height: 8px; border-radius: 4px;
+    background: var(--surface); overflow: hidden; margin-bottom: 20px;
+  }
+  .bar { height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .15s ease; }
+  input {
+    width: 100%; max-width: 320px; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid #3a3145; background: var(--surface); color: var(--text);
+    font-size: .95rem; margin-bottom: 12px;
+  }
+  button {
+    padding: 10px 18px; border-radius: 8px; border: none;
+    background: var(--accent); color: var(--bg); font-weight: 600;
+  }
+  a { color: var(--muted); font-size: .85rem; margin-top: 18px; }
+</style>
+</head>
+<body>
+  <p class="msg" id="msg">Uploading…</p>
+  <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+  <input id="cap" placeholder="Add a caption…" />
+  <button id="save" disabled>Save caption</button>
+  <a href="/">Back to Moments</a>
+
+<script>
+  const id = new URLSearchParams(location.search).get('id');
+  const msg = document.getElementById('msg');
+  const bar = document.getElementById('bar');
+  const cap = document.getElementById('cap');
+  const save = document.getElementById('save');
+  let postId;
+
+  (async () => {
+    const cache = await caches.open('share-pending');
+    const res = await cache.match('/share-pending-' + id);
+    if (!res) {
+      msg.textContent = 'Nothing came through — try sharing again.';
+      return;
+    }
+    const form = await res.formData();
+    await cache.delete('/share-pending-' + id);
+
+    cap.value = form.get('text') ?? '';
+
+    // Compress images before upload: Supabase's on-the-fly resizing is Pro-only,
+    // so shrink client-side (canvas -> JPEG). Faster upload AND faster feed loads.
+    // Videos pass through untouched.
+    const out = new FormData();
+    const photos = form.getAll('photos');
+    const totalBytes = photos.reduce((n, f) => n + f.size, 0);
+    for (const file of photos) {
+      out.append('photos', (await compress(file)) ?? file);
+    }
+
+    // XHR gives upload progress; fetch doesn't.
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/share-target');
+    xhr.setRequestHeader('Accept', 'application/json');
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        bar.style.width = Math.round((e.loaded / e.total) * 100) + '%';
+      }
+    };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status === 200 && data.postId) {
+        postId = data.postId;
+        bar.style.width = '100%';
+        msg.textContent = 'Saved. Add a caption?';
+        save.disabled = false;
+      } else {
+        msg.textContent = 'Upload failed — try sharing again.';
+      }
+    };
+    xhr.onerror = () => { msg.textContent = 'Upload failed — check your connection.'; };
+    xhr.send(out);
+  })();
+
+  // Resize image to at most MAX_W wide (keeps aspect), re-encode as JPEG.
+  async function compress(file) {
+    if (!file.type.startsWith('image/') || file.type === 'image/gif') return null;
+    const MAX_W = 1600, QUALITY = 0.82;
+    try {
+      const bmp = await createImageBitmap(file);
+      if (bmp.width <= MAX_W && bmp.height <= MAX_W) return null; // already small
+      const scale = Math.min(1, MAX_W / Math.max(bmp.width, bmp.height));
+      const w = Math.round(bmp.width * scale);
+      const h = Math.round(bmp.height * scale);
+      const canvas = new OffscreenCanvas(w, h);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bmp, 0, 0, w, h);
+      const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: QUALITY });
+      return new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' });
+    } catch (e) {
+      return null; // fall back to original on any failure
+    }
+  }
+
+  save.onclick = async () => {
+    await fetch('/share-target/posts/' + postId + '/caption', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caption: cap.value }),
+    });
+    msg.textContent = 'Caption saved.';
+  };
+</script>
+</body>
+</html>
