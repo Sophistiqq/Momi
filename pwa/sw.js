@@ -1,5 +1,5 @@
 const CACHE = 'moments-shell';
-const SHELL = ['/', '/manifest.json', '/caption'];
+const SHELL = ['/', '/manifest.json', '/caption', '/style.css'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

@@ -2,43 +2,24 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Moments</title>
 <link rel="manifest" href="/manifest.json" />
-<meta name="theme-color" content="#1b1622" />
-<style>
-  :root { --bg:#1b1622; --surface:#241d2e; --text:#f2ece5; --muted:#a89bb0; --accent:#d4a574; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; background: var(--bg);
-    color: var(--text); font-family: Georgia, 'Iowan Old Style', serif;
-    text-align: center; padding: 32px;
-  }
-  p.msg { color: var(--accent); margin: 0 0 20px; font-family: -apple-system, system-ui, sans-serif; }
-  .bar-wrap {
-    width: 100%; max-width: 320px; height: 8px; border-radius: 4px;
-    background: var(--surface); overflow: hidden; margin-bottom: 20px;
-  }
-  .bar { height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .15s ease; }
-  input {
-    width: 100%; max-width: 320px; padding: 10px 12px; border-radius: 8px;
-    border: 1px solid #3a3145; background: var(--surface); color: var(--text);
-    font-size: .95rem; margin-bottom: 12px;
-  }
-  button {
-    padding: 10px 18px; border-radius: 8px; border: none;
-    background: var(--accent); color: var(--bg); font-weight: 600;
-  }
-  a { color: var(--muted); font-size: .85rem; margin-top: 18px; }
-</style>
+<meta name="theme-color" content="#09090b" />
+<style>html { background: #09090b; }</style>
+<link rel="stylesheet" href="/style.css" />
 </head>
-<body>
-  <p class="msg" id="msg">Uploading…</p>
-  <div class="bar-wrap"><div class="bar" id="bar"></div></div>
-  <input id="cap" placeholder="Add a caption…" />
-  <button id="save" disabled>Save caption</button>
-  <a href="/">Back to Moments</a>
+<body class="cap-page">
+  <main class="cap-card">
+    <h1 class="logo">Moments</h1>
+    <p class="msg" id="msg">Uploading…</p>
+    <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+    <textarea id="cap" class="input" rows="3" placeholder="Write a caption…"></textarea>
+    <div class="cap-actions">
+      <button id="save" class="btn btn-primary" disabled>Save caption</button>
+      <a class="btn btn-ghost" href="/">Done</a>
+    </div>
+  </main>
 
 <script>
   const id = new URLSearchParams(location.search).get('id');
@@ -85,7 +66,7 @@
       if (xhr.status === 200 && data.postId) {
         postId = data.postId;
         bar.style.width = '100%';
-        msg.textContent = 'Saved. Add a caption?';
+        msg.textContent = 'Uploaded — add a caption?';
         save.disabled = false;
       } else {
         msg.textContent = 'Upload failed — try sharing again.';
@@ -122,6 +103,8 @@
       body: JSON.stringify({ caption: cap.value }),
     });
     msg.textContent = 'Caption saved.';
+    cap.disabled = true;
+    save.disabled = true;
   };
 </script>
 </body>

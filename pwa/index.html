@@ -1,151 +1,152 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Moments</title>
 <link rel="manifest" href="/manifest.json" />
-<meta name="theme-color" content="#1b1622" />
-<link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
-<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<meta name="theme-color" content="#09090b" />
+<style>html { background: #09090b; }</style>
+<link rel="stylesheet" href="/style.css" />
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
-<style>
-  html { background: #1b1622; }
-  .card-media { aspect-ratio: 4 / 3; object-fit: cover; width: 100%; }
-  .carousel-media { max-height: 42vh; width: 100%; object-fit: contain; background: #000; }
-  .media-stage { touch-action: pan-y; }
-</style>
 </head>
-<body class="min-h-screen" x-data="feed" x-init="init()">
-  <div class="max-w-5xl mx-auto px-4 py-6">
-    <header class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-serif tracking-wide">Moments</h1>
-      <div class="flex gap-2">
-        <button class="btn btn-sm btn-ghost" @click="init()" :class="{ 'loading': loading }">↻</button>
-        <span class="text-sm opacity-60" x-text="countText"></span>
-      </div>
-    </header>
+<body x-data="feed" x-init="init()">
 
-    <!-- Empty / loading states -->
-    <div x-show="loading" class="flex justify-center py-24">
-      <span class="loading loading-spinner loading-lg text-warning"></span>
-    </div>
-    <div x-show="!loading && error" class="alert alert-error">
-      <span>Couldn&rsquo;t load. Check your connection.</span>
-    </div>
-    <div x-show="!loading && !error && posts.length === 0" class="text-center py-24 opacity-70">
-      <p class="text-lg mb-2">Nothing here yet.</p>
-      <p class="text-sm">Share a photo from your gallery &rarr; Moments</p>
-    </div>
+<header class="topbar">
+  <h1 class="logo logo-lg">Moments</h1>
+  <div class="topbar-right">
+    <span class="count" x-text="countText"></span>
+    <button class="icon-btn" @click="init()" :disabled="loading" aria-label="Refresh">
+      <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="round" :class="{ 'spin': loading }">
+        <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 1.5v3h-3"/>
+      </svg>
+    </button>
+  </div>
+</header>
 
-    <!-- Feed grid -->
-    <div x-show="!loading && !error && posts.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-      <template x-for="post in posts" :key="post.id">
-        <button class="card bg-base-200 overflow-hidden rounded-xl p-0 text-left cursor-pointer hover:opacity-90 transition"
-                @click="openPost(post)">
-          <template x-if="post.post_media && post.post_media.length">
-            <img class="card-media"
-                 :src="post.post_media[0].url"
-                 :alt="post.caption || ''"
-                 loading="lazy"
-                 :class="{ 'aspect-auto': post.post_media[0].mime_type.startsWith('video') }" />
+<main>
+  <div class="state" :class="{ 'show': loading }">
+    <h2>Loading…</h2>
+  </div>
+
+  <div class="state" :class="{ 'show': !loading && error }">
+    <h2>Couldn&rsquo;t load</h2>
+    <p>Check your connection and try again.</p>
+    <button class="btn btn-primary" @click="init()">Try again</button>
+  </div>
+
+  <div class="state" :class="{ 'show': !loading && !error && posts.length === 0 }">
+    <h2>Nothing here yet</h2>
+    <p>Share a photo or video from your gallery — it&rsquo;ll land right here.</p>
+  </div>
+
+  <!-- Feed: 3-up square grid, Instagram-style -->
+  <div class="feed" x-show="!loading && !error && posts.length">
+    <template x-for="post in posts" :key="post.id">
+      <button class="tile" @click="openPost(post)">
+        <template x-if="isVideo(post)">
+          <video :src="feedSrc(post)" preload="metadata" muted playsinline></video>
+        </template>
+        <template x-if="!isVideo(post) && postMedia(post)">
+          <img :src="postMedia(post).url" :alt="post.caption || ''" loading="lazy" />
+        </template>
+        <svg class="play" x-show="isVideo(post)" viewBox="0 0 24 24" width="44" height="44" fill="currentColor">
+          <circle cx="12" cy="12" r="10.5" fill="rgba(0,0,0,.45)"/>
+          <path d="M10 8.5l6 3.5-6 3.5z"/>
+        </svg>
+        <svg class="multi" x-show="(post.post_media?.length || 0) > 1" viewBox="0 0 16 16"
+             width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="1.6" y="4.6" width="10" height="10" rx="1.8"/><path d="M4.5 1.5h7.9a2.1 2.1 0 0 1 2.1 2.1v7.9"/>
+        </svg>
+      </button>
+    </template>
+  </div>
+</main>
+
+<!-- Post viewer: full screen on mobile, side-by-side on desktop -->
+<div class="viewer" :class="{ 'open': activePost }" @keydown.escape.window="activePost = null">
+  <div class="viewer-backdrop" @click="activePost = null"></div>
+  <template x-if="activePost">
+    <div class="viewer-panel">
+      <!-- Square stage by default (Instagram-style); tap for the full uncropped image -->
+      <div class="media-cell" :class="{ 'fit': fitMode }"
+           @click="fitMode = !fitMode"
+           @touchstart.passive="touchX = $event.touches[0].clientX"
+           @touchend.passive="swipe($event.changedTouches[0].clientX - touchX)">
+        <div class="strip" :style="'transform: translateX(-' + (mediaIndex * 100) + '%)'">
+          <template x-for="(m, i) in activePost.post_media" :key="m.id">
+            <div class="slide">
+              <template x-if="(m.mime_type || '').startsWith('video')">
+                <video :src="m.url" :controls="i === mediaIndex" preload="metadata" @click.stop></video>
+              </template>
+              <template x-if="!((m.mime_type || '').startsWith('video'))">
+                <img :src="m.url" :alt="activePost.caption || ''" />
+              </template>
+            </div>
           </template>
-          <div class="p-2 text-xs">
-            <p x-show="post.caption" class="truncate opacity-90" x-text="post.caption"></p>
-            <p x-show="!post.caption" class="opacity-50 italic">No caption</p>
-          </div>
-        </button>
-      </template>
-    </div>
-  </div>
-
-  <!-- Post detail modal -->
-  <div class="modal" :class="{ 'modal-open': activePost }" @keydown.escape.window="activePost = null">
-    <div class="modal-box max-w-3xl p-0 overflow-hidden">
-      <template x-if="activePost">
-        <div class="flex flex-col max-h-[85vh]">
-          <div class="flex items-center justify-between px-4 py-3 border-b border-base-300">
-            <p class="text-xs opacity-70" x-text="formatDate(activePost.created_at)"></p>
-            <button class="btn btn-sm btn-ghost" @click="activePost = null">✕</button>
-          </div>
-
-          <div class="overflow-y-auto flex-1">
-            <!-- Media: swipeable carousel, one item at a time (Instagram-style) -->
-            <div x-show="activePost.post_media && activePost.post_media.length" class="relative">
-              <div class="media-stage flex items-center justify-center bg-black cursor-pointer"
-                   @click="openComments()"
-                   @touchstart.passive="touchX = $event.touches[0].clientX"
-                   @touchend.passive="swipe($event.changedTouches[0].clientX - touchX)">
-                <template x-if="media && media.mime_type.startsWith('video')">
-                  <video class="carousel-media" controls preload="metadata" :src="media.url"
-                         @click.stop></video>
-                </template>
-                <template x-if="media && !media.mime_type.startsWith('video')">
-                  <img class="carousel-media" :src="media.url" :alt="activePost.caption || ''" />
-                </template>
-              </div>
-              <!-- Dots -->
-              <div x-show="activePost.post_media && activePost.post_media.length > 1"
-                   class="absolute bottom-2 inset-x-0 flex justify-center gap-1.5">
-                <template x-for="(m, i) in activePost.post_media" :key="i">
-                  <button class="w-1.5 h-1.5 rounded-full transition"
-                          :class="i === mediaIndex ? 'bg-primary scale-125' : 'bg-base-100/50'"
-                          @click="mediaIndex = i"></button>
-                </template>
-              </div>
-            </div>
-
-            <!-- Caption -->
-            <div class="px-4 py-3">
-              <template x-if="!editingCaption">
-                <div class="flex justify-between items-start gap-3">
-                  <p x-show="activePost.caption" class="text-sm leading-relaxed" x-text="activePost.caption"></p>
-                  <p x-show="!activePost.caption" class="text-sm opacity-50 italic">No caption</p>
-                  <button class="btn btn-xs btn-ghost shrink-0" @click="startEditCaption()">Edit</button>
-                </div>
-              </template>
-              <template x-if="editingCaption">
-                <div class="flex gap-2">
-                  <input class="input input-bordered input-sm flex-1" x-model="captionDraft"
-                         placeholder="Add a caption…" @keydown.enter="saveCaption()" />
-                  <button class="btn btn-sm btn-primary" @click="saveCaption()">Save</button>
-                </div>
-              </template>
-            </div>
-
-            <!-- Comments -->
-            <div class="px-4 pb-4">
-              <p class="text-xs uppercase tracking-wide opacity-60 mb-2">Comments</p>
-              <div x-show="comments.length === 0" class="text-xs opacity-50 italic mb-2">
-                No comments yet.
-              </div>
-              <div x-show="comments.length" class="space-y-2 mb-3">
-                <template x-for="c in comments" :key="c.id">
-                  <div class="bg-base-300 rounded-lg px-3 py-2">
-                    <div class="flex justify-between items-baseline gap-2">
-                      <span class="text-xs font-semibold text-warning" x-text="c.author || 'Anonymous'"></span>
-                      <span class="text-[10px] opacity-50" x-text="formatDate(c.created_at)"></span>
-                    </div>
-                    <p class="text-sm mt-1" x-text="c.body"></p>
-                  </div>
-                </template>
-              </div>
-
-              <div class="flex gap-2">
-                <input class="input input-bordered input-sm flex-1" x-model="newComment"
-                       placeholder="Write a comment…" @keydown.enter="addComment()"
-                       :disabled="commenting" />
-                <button class="btn btn-sm btn-primary" @click="addComment()"
-                        :disabled="commenting || !newComment.trim()"
-                        :class="{ 'loading': commenting }">Send</button>
-              </div>
-            </div>
-          </div>
         </div>
-      </template>
+        <div class="dots" x-show="(activePost.post_media?.length || 0) > 1">
+          <template x-for="(m, i) in activePost.post_media" :key="i">
+            <button :class="{ 'active': i === mediaIndex }" @click.stop="mediaIndex = i"></button>
+          </template>
+        </div>
+      </div>
+
+      <div class="info-cell">
+        <div class="info-head">
+          <span class="date" x-text="formatDate(activePost.created_at)"></span>
+          <button class="icon-btn" @click="startEditCaption()" aria-label="Edit caption">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M11.3 2.2a1.5 1.5 0 0 1 2.1 2.1L5 12.7l-3 .7.7-3z"/>
+            </svg>
+          </button>
+          <button class="icon-btn" @click="activePost = null" aria-label="Close">✕</button>
+        </div>
+
+        <div class="info-scroll">
+          <template x-if="!editingCaption">
+            <div class="comment caption-comment">
+              <p :class="{ 'muted': !activePost.caption }" x-text="activePost.caption || 'No caption yet'"></p>
+              <span class="meta" x-text="formatDate(activePost.created_at)"></span>
+            </div>
+          </template>
+          <template x-if="editingCaption">
+            <div>
+              <textarea class="input" x-model="captionDraft" rows="3"
+                        placeholder="Write a caption…" @keydown.ctrl.enter="saveCaption()"></textarea>
+              <div class="caption-edit-actions">
+                <button class="btn btn-ghost" @click="editingCaption = false">Cancel</button>
+                <button class="btn btn-primary" @click="saveCaption()">Save</button>
+              </div>
+            </div>
+          </template>
+
+          <p class="comments-title">Comments</p>
+          <p class="comments-empty" x-show="!comments.length">Be the first to comment.</p>
+          <template x-for="c in comments" :key="c.id">
+            <div class="comment">
+              <p><span class="author" x-text="c.author || 'Anonymous'"></span><span x-text="c.body"></span></p>
+              <span class="meta" x-text="formatDate(c.created_at)"></span>
+            </div>
+          </template>
+        </div>
+
+        <div class="composer">
+          <input class="input" x-model="newComment" placeholder="Add a comment…"
+                 @keydown.enter="addComment()" :disabled="commenting" />
+          <button class="icon-btn" @click="addComment()" aria-label="Post"
+                  :disabled="commenting || !newComment.trim()">
+            <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor"
+                 stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1.5 8L14.5 1.5 9.5 14.5l-1.6-5-6.4-1.5z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
     </div>
-    <div class="modal-backdrop" @click="activePost = null"></div>
-  </div>
+  </template>
+</div>
 
 <script>
   function feed() {
@@ -155,6 +156,7 @@
       error: false,
       activePost: null,
       mediaIndex: 0,
+      fitMode: false,
       touchX: 0,
       comments: [],
       newComment: '',
@@ -170,11 +172,27 @@
         return this.posts.length ? `${this.posts.length} moment${this.posts.length > 1 ? 's' : ''}` : '';
       },
 
+      postMedia(post) {
+        return post?.post_media?.[0] || null;
+      },
+
+      isVideo(post) {
+        const m = this.postMedia(post);
+        return !!m && (m.mime_type || '').startsWith('video');
+      },
+
+      feedSrc(post) {
+        const m = this.postMedia(post);
+        if (!m) return '';
+        // #t=0.1 forces Chrome to grab a real frame instead of a black box.
+        return (m.mime_type || '').startsWith('video') ? m.url + '#t=0.1' : m.url;
+      },
+
       async init() {
         this.loading = true;
         this.error = false;
         try {
-          const res = await fetch('/share-target/posts');
+          const res = await fetch('/share-target/posts', { headers: { 'Accept': 'application/json' } });
           if (!res.ok) throw new Error(res.status);
           this.posts = await res.json();
         } catch (e) {
@@ -187,17 +205,15 @@
       async openPost(post) {
         this.activePost = post;
         this.mediaIndex = 0;
+        this.fitMode = false;
         this.comments = [];
         this.editingCaption = false;
         try {
-          const res = await fetch(`/share-target/posts/${post.id}/comments`);
+          const res = await fetch(`/share-target/posts/${post.id}/comments`, {
+            headers: { 'Accept': 'application/json' },
+          });
           if (res.ok) this.comments = await res.json();
         } catch (e) {}
-      },
-
-      // Tap on media jumps straight to the comments.
-      openComments() {
-        document.querySelector('.modal-box .overflow-y-auto')?.scrollTo({ top: 99999, behavior: 'smooth' });
       },
 
       swipe(dx) {
@@ -217,7 +233,7 @@
         try {
           await fetch(`/share-target/posts/${post.id}/caption`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ caption: this.captionDraft.trim() }),
           });
           post.caption = this.captionDraft.trim();
@@ -232,7 +248,7 @@
         try {
           const res = await fetch(`/share-target/posts/${this.activePost.id}/comments`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ body }),
           });
           if (res.ok) {
