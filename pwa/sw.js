@@ -1,4 +1,4 @@
-const CACHE = 'moments-shell-v2'; // bump to invalidate every phone's cached shell
+const CACHE = 'moments-shell-v3'; // bump to invalidate every phone's cached shell
 const SHELL = ['/', '/manifest.json', '/caption', '/style.css'];
 
 self.addEventListener('install', (event) => {
@@ -13,7 +13,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE && k !== 'share-pending').map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
     )
   );
   event.waitUntil(self.clients.claim());
@@ -22,12 +22,14 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Android share target: catch the POST navigation, stash the files, and
-  // redirect straight to the caption page. Without this, the browser shows a
-  // blank splash for the entire upload before rendering anything.
+  // Android share target: upload the shared files to the function RIGHT HERE
+  // (the SW has the raw body and the session cookie rides along on the
+  // same-origin fetch), then redirect to a pure result page. Doing the upload
+  // in the SW means no form round-trip through the Cache API — that's what
+  // produced empty uploads and hung requests before.
   // We key off Accept, not request.mode: Chrome doesn't reliably mark
   // share-target POSTs as 'navigate', but the caption page's own background
-  // upload always sends Accept: application/json, which shares never do.
+  // requests always send Accept: application/json, which shares never do.
   if (
     event.request.method === 'POST' &&
     url.pathname.startsWith('/share-target') &&
@@ -61,13 +63,25 @@ self.addEventListener('fetch', (event) => {
 });
 
 async function handleShare(request) {
-  // Cache the raw request bytes, NOT request.formData(): formData() returns
-  // stream-backed files that serialize empty into the cache, so a later
-  // re-upload sends a bodiless multipart and the function hangs forever.
-  const contentType = request.headers.get('content-type') || 'multipart/form-data';
   const body = await request.arrayBuffer();
-  const id = crypto.randomUUID();
-  const cache = await caches.open('share-pending');
-  await cache.put('/share-pending-' + id, new Response(body, { headers: { 'Content-Type': contentType } }));
-  return Response.redirect(`/caption?id=${id}`, 303);
+  const redirect = (path) => Response.redirect(path, 303);
+  let text = '';
+  try {
+    text = (await request.formData()).get('text') || '';
+  } catch {}
+  try {
+    const res = await fetch('/share-target', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': request.headers.get('content-type') || 'multipart/form-data',
+      },
+      body,
+    });
+    const data = await res.json().catch(() => null);
+    if (res.ok && data?.postId) {
+      return redirect(`/caption?id=${data.postId}&ok=1&text=${encodeURIComponent(text)}`);
+    }
+  } catch {}
+  return redirect('/caption?ok=0');
 }
