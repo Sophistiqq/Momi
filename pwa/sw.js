@@ -63,8 +63,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Assets (manifest, icons, media): cache-first.
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+  // Assets (manifest, icons, media): stale-while-revalidate. Serve the cached
+  // copy immediately, refresh it in the background. Range requests (video
+  // seeking) go straight to the network — caching a 206 would corrupt playback.
+  if (event.request.headers.has('range')) return;
+  event.respondWith(
+    caches.open(CACHE).then(async (cache) => {
+      const cached = await cache.match(event.request);
+      const network = fetch(event.request)
+        .then((res) => {
+          if (res.ok && res.status === 200) cache.put(event.request, res.clone());
+          return res;
+        })
+        .catch(() => cached);
+      return cached || network;
+    })
+  );
 });
 
 async function handleShare(request) {

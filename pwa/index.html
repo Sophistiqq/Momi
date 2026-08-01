@@ -88,9 +88,10 @@
     <div class="viewer-panel">
       <!-- Square stage by default (Instagram-style); tap for the full uncropped image -->
       <div class="media-cell" :class="{ 'fit': fitMode }"
-           @click="fitMode = !fitMode"
-           @touchstart.passive="touchX = $event.touches[0].clientX"
-           @touchend.passive="swipe($event.changedTouches[0].clientX - touchX)">
+           @click="onMediaTap()"
+           @touchstart.passive="onTouchStart($event)"
+           @touchmove.prevent="onTouchMove($event)"
+           @touchend.passive="onTouchEnd($event)">
         <div class="strip" :style="'transform: translateX(-' + (mediaIndex * 100) + '%)'">
           <template x-for="(m, i) in activePost.post_media" :key="m.id">
             <div class="slide">
@@ -227,6 +228,9 @@
       mediaIndex: 0,
       fitMode: false,
       touchX: 0,
+      zoom: 1,
+      tapAt: 0,
+      pinch: { active: false, dist: 0, scale: 1 },
       comments: [],
       newComment: '',
       commenting: false,
@@ -314,6 +318,8 @@
         this.activePost = post;
         this.mediaIndex = 0;
         this.fitMode = false;
+        this.zoom = 1;
+        this.pinch = { active: false, dist: 0, scale: 1 };
         this.comments = [];
         this.editingCaption = false;
         try {
@@ -327,8 +333,81 @@
       swipe(dx) {
         const n = this.activePost.post_media.length;
         if (Math.abs(dx) < 40) return;
-        if (dx < 0) this.mediaIndex = Math.min(n - 1, this.mediaIndex + 1);
-        else this.mediaIndex = Math.max(0, this.mediaIndex - 1);
+        this.zoom = 1;
+        this.mediaIndex = dx < 0 ? Math.min(n - 1, this.mediaIndex + 1) : Math.max(0, this.mediaIndex - 1);
+        this.clearZoom();
+      },
+
+      onTouchStart(e) {
+        this.touchX = e.touches[0].clientX;
+        if (e.touches.length === 2) {
+          const [a, b] = e.touches;
+          this.pinch = {
+            active: true,
+            dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+            scale: this.zoom,
+          };
+          this.applyZoom(e);
+        }
+      },
+
+      onTouchMove(e) {
+        if (this.pinch.active && e.touches.length === 2) {
+          const [a, b] = e.touches;
+          const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+          this.zoom = Math.min(4, Math.max(1, this.pinch.scale * (d / this.pinch.dist)));
+          this.applyZoom(e);
+        }
+      },
+
+      onTouchEnd(e) {
+        if (this.pinch.active) {
+          this.pinch.active = false;
+          return;
+        }
+        const now = Date.now();
+        if (now - this.tapAt < 300) {
+          // Double-tap toggles 2x zoom.
+          this.tapAt = 0;
+          this.zoom = this.zoom > 1 ? 1 : 2.5;
+          this.applyZoom();
+          return;
+        }
+        this.tapAt = now;
+        this.swipe(e.changedTouches[0].clientX - this.touchX);
+      },
+
+      onMediaTap() {
+        if (this.zoom > 1) {
+          this.zoom = 1;
+          this.clearZoom();
+          return;
+        }
+        this.fitMode = !this.fitMode;
+      },
+
+      // Scale the current slide's media around the pinch midpoint.
+      applyZoom(e) {
+        const slide = this.$el.querySelectorAll('.slide')[this.mediaIndex];
+        const el = slide?.querySelector('img, video');
+        if (!el) return;
+        if (this.zoom > 1) {
+          const r = slide.getBoundingClientRect();
+          const cx = e ? e.touches[0].clientX + (e.touches[1].clientX - e.touches[0].clientX) / 2 : r.width / 2;
+          const cy = e ? e.touches[0].clientY + (e.touches[1].clientY - e.touches[0].clientY) / 2 : r.height / 2;
+          el.style.transformOrigin = (cx - r.left) + 'px ' + (cy - r.top) + 'px';
+          el.style.transform = 'scale(' + this.zoom + ')';
+        } else {
+          this.clearZoom();
+        }
+      },
+
+      clearZoom() {
+        const slide = this.$el.querySelectorAll('.slide')[this.mediaIndex];
+        const el = slide?.querySelector('img, video');
+        if (!el) return;
+        el.style.transform = '';
+        el.style.transformOrigin = '';
       },
 
       startEditCaption() {
