@@ -166,6 +166,12 @@
   </template>
 </div>
 
+<!-- New-version banner: shown when the service worker has an update ready -->
+<div class="update-banner" id="updateBanner" hidden>
+  <span>New version available</span>
+  <button class="btn btn-primary" id="updateBtn">Update</button>
+</div>
+
 <script>
   // Session lives in a cookie (not localStorage) because the Android share
   // sheet and the caption page's XHR are plain navigations/fetches that can't
@@ -371,18 +377,40 @@
     };
   }
 
-  // Register the service worker so browsers pick up new versions automatically.
-  // The SW calls skipWaiting() on install + clients.claim() on activate, so a
-  // new deploy activates immediately; this reloads once to drop the old page.
-  (() => {
+  // Service worker updates are manual: a new deploy installs in the
+  // background, waits, and the banner offers "Update" (skipWaiting + reload).
+  // Polling + visibilitychange surface updates even on an open tab.
+  (async () => {
     if (!('serviceWorker' in navigator)) return;
+    const banner = document.getElementById('updateBanner');
+    const btn = document.getElementById('updateBtn');
     let refreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (refreshing) return;
       refreshing = true;
       location.reload();
     });
-    navigator.serviceWorker.register('/sw.js');
+
+    const reg = await navigator.serviceWorker.register('/sw.js');
+
+    const offer = (sw) => {
+      if (!sw) return;
+      btn.onclick = () => sw.postMessage({ type: 'SKIP_WAITING' });
+      banner.hidden = false;
+    };
+
+    reg.addEventListener('updatefound', () => {
+      const sw = reg.installing;
+      sw?.addEventListener('statechange', () => {
+        if (sw.state === 'installed') offer(sw);
+      });
+    });
+    if (reg.waiting) offer(reg.waiting);
+
+    setInterval(() => reg.update(), 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update();
+    });
   })();
 </script>
 </body>

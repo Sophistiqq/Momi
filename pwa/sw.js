@@ -7,7 +7,12 @@ self.addEventListener('install', (event) => {
       .open(CACHE)
       .then((c) => Promise.all(SHELL.map((u) => c.add(u).catch(() => {}))))
   );
-  self.skipWaiting();
+});
+
+// No skipWaiting(): the update waits for the user to tap "Update" on the
+// banner, which sends SKIP_WAITING, which activates this worker and reloads.
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
