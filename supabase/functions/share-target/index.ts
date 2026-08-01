@@ -19,14 +19,14 @@ const TOKEN_COOKIE = 'sb-auth-token';
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
-
-  if (!(await getUser(req))) return unauthorized(req);
+  const user = await getUser(req);
+  if (!user) return unauthorized(req);
 
   // Android's share sheet does a real browser navigation: POST multipart/form-data
   // straight to this URL. We store the files, create a "pending_style" post,
   // and respond with an HTML page (not JSON) since this is a page load, not a fetch.
   if (req.method === 'POST' && url.pathname.endsWith('/share-target')) {
-    return handleShare(req);
+    return handleShare(req, user);
   }
 
   // Lets either of you fix the caption right after upload, or later from the feed.
@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
     return handleComments(commentsMatch[1]);
   }
   if (req.method === 'POST' && commentsMatch) {
-    return handleAddComment(req, commentsMatch[1]);
+    return handleAddComment(req, commentsMatch[1], user);
   }
 
   if (req.method === 'GET' && url.pathname.endsWith('/share-target/posts')) {
@@ -68,6 +68,17 @@ async function getUser(req: Request) {
   }
 }
 
+// Display name for a verified user. Google OAuth puts the real name in
+// user_metadata; fall back to the email prefix.
+function authorName(user: any) {
+  return (
+    user.user_metadata?.full_name ||
+    user.user_metadata?.name ||
+    user.email?.split('@')[0] ||
+    'Anonymous'
+  );
+}
+
 function unauthorized(req: Request): Response {
   if ((req.headers.get('accept') ?? '').includes('application/json')) {
     return Response.json({ error: 'unauthorized' }, { status: 401 });
@@ -85,7 +96,7 @@ function unauthorized(req: Request): Response {
 </body></html>`, { status: 401, headers: { 'Content-Type': 'text/html' } });
 }
 
-async function handleShare(req: Request): Promise<Response> {
+async function handleShare(req: Request, user: any): Promise<Response> {
   const form = await req.formData();
   const text = (form.get('text') as string) ?? '';
   const files = form.getAll('photos') as File[];
@@ -100,6 +111,7 @@ async function handleShare(req: Request): Promise<Response> {
   const { error: postErr } = await supabase.from('posts').insert({
     id: postId,
     caption: text,
+    author: authorName(user),
     created_at: createdAt,
     status: 'pending_style',
   });
@@ -154,15 +166,15 @@ async function handleComments(postId: string): Promise<Response> {
   return Response.json(data ?? []);
 }
 
-async function handleAddComment(req: Request, postId: string): Promise<Response> {
-  const { author, body } = await req.json();
+async function handleAddComment(req: Request, postId: string, user: any): Promise<Response> {
+  const { body } = await req.json();
   if (!body || !body.trim()) {
     return Response.json({ error: 'comment body required' }, { status: 400 });
   }
   const { error } = await supabase.from('comments').insert({
     id: crypto.randomUUID(),
     post_id: postId,
-    author: (author ?? '').trim(),
+    author: authorName(user),
     body: body.trim(),
   });
   if (error) throw error;
@@ -172,7 +184,7 @@ async function handleAddComment(req: Request, postId: string): Promise<Response>
 async function handleList(): Promise<Response> {
   const { data, error } = await supabase
     .from('posts')
-    .select('id, caption, created_at, status, post_media(id, object_key, mime_type, sort_order)')
+    .select('id, caption, author, created_at, status, post_media(id, object_key, mime_type, sort_order)')
     .order('created_at', { ascending: false })
     .limit(50);
   if (error) throw error;

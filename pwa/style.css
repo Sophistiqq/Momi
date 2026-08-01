@@ -141,6 +141,7 @@ main { max-width: 1240px; margin: 0 auto; padding-bottom: 48px; }
 
 .caption-comment { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
 .caption-comment p { font-size: .82rem; color: var(--muted); }
+.caption-comment p.author { font-weight: 700; color: var(--text); }
 .caption-comment .meta { font-size: .72rem; }
 
 .caption-edit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }

@@ -124,6 +124,7 @@
         <div class="info-scroll">
           <template x-if="!editingCaption">
             <div class="comment caption-comment">
+              <p class="author" x-show="activePost.author" x-text="activePost.author"></p>
               <p :class="{ 'muted': !activePost.caption }" x-text="activePost.caption || 'No caption yet'"></p>
               <span class="meta" x-text="formatDate(activePost.created_at)"></span>
             </div>
@@ -353,8 +354,12 @@
             body: JSON.stringify({ body }),
           });
           if (res.ok) {
-            this.comments.push({ id: Date.now().toString(), author: '', body, created_at: new Date().toISOString() });
             this.newComment = '';
+            // Refetch so the server-set author shows immediately.
+            const list = await fetch(`/share-target/posts/${this.activePost.id}/comments`, {
+              headers: { 'Accept': 'application/json' },
+            });
+            if (list.ok) this.comments = await list.json();
           }
         } catch (e) {}
         this.commenting = false;
