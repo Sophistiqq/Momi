@@ -97,6 +97,14 @@ main { max-width: 640px; margin: 0 auto; padding-bottom: 48px; }
 .state p { color: var(--muted); font-size: .92rem; line-height: 1.5; max-width: 340px; }
 .state .btn { margin-top: 8px; }
 
+.spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+
 /* ---- Sign-in ---- */
 .state.login { gap: 14px; padding-top: 20vh; }
 .state.login .logo { font-size: 1.6rem; }

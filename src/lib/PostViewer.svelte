@@ -148,93 +148,97 @@
   }
 </script>
 
-<div class="viewer" class:open={true} bind:this={mediaCell}>
+<div class="viewer open">
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div class="viewer-backdrop" onclick={onClose}></div>
 
-  <!-- Square stage by default (Instagram-style); tap for the full uncropped image -->
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div
-    class="media-cell"
-    class:fit={fitMode}
-    onclick={onMediaTap}
-    ontouchstart={onTouchStart}
-    ontouchmove={onTouchMove}
-    ontouchend={onTouchEnd}
-  >
-    <div class="strip" style="transform: translateX(-{mediaIndex * 100}%)">
-      {#each post.post_media as m, i (m.id)}
-        <div class="slide">
-          {#if (m.mime_type || '').startsWith('video')}
-            <!-- svelte-ignore a11y_media_has_caption -->
-            <video src={m.url} controls={i === mediaIndex} preload="metadata" onclick={(e) => e.stopPropagation()}></video>
-          {:else}
-            <img src={m.url} alt={post.caption || ''} />
-          {/if}
-        </div>
-      {/each}
-    </div>
-    {#if post.post_media.length > 1}
-      <div class="dots">
+  <div class="viewer-panel">
+    <!-- Square stage by default (Instagram-style); tap for the full uncropped image -->
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div
+      class="media-cell"
+      class:fit={fitMode}
+      bind:this={mediaCell}
+      onclick={onMediaTap}
+      ontouchstart={onTouchStart}
+      ontouchmove={onTouchMove}
+      ontouchend={onTouchEnd}
+    >
+      <div class="strip" style="transform: translateX(-{mediaIndex * 100}%)">
         {#each post.post_media as m, i (m.id)}
-          <button class:active={i === mediaIndex} aria-label={`Media ${i + 1}`} onclick={(e) => { e.stopPropagation(); mediaIndex = i; }}></button>
+          <div class="slide">
+            {#if (m.mime_type || '').startsWith('video')}
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <video src={m.url} controls={i === mediaIndex} preload="metadata" onclick={(e) => e.stopPropagation()}></video>
+            {:else}
+              <img src={m.url} alt={post.caption || ''} />
+            {/if}
+          </div>
         {/each}
       </div>
-    {/if}
-  </div>
-
-  <div class="info-cell">
-    <div class="info-head">
-      <span class="info-name">{post.author}</span>
-      <div class="menu" use:clickOutside={() => (showMenu = false)}>
-        <button class="icon-btn" onclick={() => (showMenu = !showMenu)} aria-label="Options">⋯</button>
-        {#if showMenu}
-          <div class="menu-list">
-            <button onclick={() => { startEditCaption(); showMenu = false; }}>Edit caption</button>
-          </div>
-        {/if}
-      </div>
+      {#if post.post_media.length > 1}
+        <div class="dots">
+          {#each post.post_media as m, i (m.id)}
+            <button class:active={i === mediaIndex} aria-label={`Media ${i + 1}`} onclick={(e) => { e.stopPropagation(); mediaIndex = i; }}></button>
+          {/each}
+        </div>
+      {/if}
     </div>
 
-    <div class="info-scroll">
-      {#if !editingCaption}
-        <div class="post-caption">
-          <p class:muted={!post.caption}>{post.caption || 'No caption yet'}</p>
-          <time>{formatDateTime(post.created_at)}</time>
-          {#if post.location}
-            <p class="post-location">{post.location}</p>
+    <div class="info-cell">
+      <div class="info-head">
+        <span class="info-name">{post.author}</span>
+        <div class="menu" use:clickOutside={() => (showMenu = false)}>
+          <button class="icon-btn" onclick={() => (showMenu = !showMenu)} aria-label="Options">⋯</button>
+          {#if showMenu}
+            <div class="menu-list">
+              <button onclick={() => { startEditCaption(); showMenu = false; }}>Edit caption</button>
+            </div>
           {/if}
         </div>
-      {:else}
-        <div>
-          <textarea class="input" bind:value={captionDraft} rows={3} placeholder="Write a caption…" onkeydown={(e) => e.ctrlKey && e.key === 'Enter' && submitCaption()}></textarea>
-          <div class="caption-edit-actions">
-            <button class="btn btn-ghost" onclick={() => (editingCaption = false)}>Cancel</button>
-            <button class="btn btn-primary" onclick={submitCaption}>Save</button>
+      </div>
+
+      <div class="info-scroll">
+        {#if !editingCaption}
+          <div class="post-caption">
+            <p class:muted={!post.caption}>{post.caption || 'No caption yet'}</p>
+            <time>{formatDateTime(post.created_at)}</time>
+            {#if post.location}
+              <p class="post-location">{post.location}</p>
+            {/if}
           </div>
-        </div>
-      {/if}
+        {:else}
+          <div>
+            <textarea class="input" bind:value={captionDraft} rows={3} placeholder="Write a caption…" onkeydown={(e) => e.ctrlKey && e.key === 'Enter' && submitCaption()}></textarea>
+            <div class="caption-edit-actions">
+              <button class="btn btn-ghost" onclick={() => (editingCaption = false)}>Cancel</button>
+              <button class="btn btn-primary" onclick={submitCaption}>Save</button>
+            </div>
+          </div>
+        {/if}
 
-      <p class="comments-title">Comments</p>
-      {#if !comments.length}
-        <p class="comments-empty">Be the first to comment.</p>
-      {/if}
-      {#each comments as c (c.id)}
-        <div class="comment">
-          <p class="c-author">{c.author || 'Anonymous'}</p>
-          <p class="c-body">{c.body}</p>
-          <span class="meta">{formatDate(c.created_at)}</span>
-        </div>
-      {/each}
-    </div>
+        <p class="comments-title">Comments</p>
+        {#if !comments.length}
+          <p class="comments-empty">Be the first to comment.</p>
+        {/if}
+        {#each comments as c (c.id)}
+          <div class="comment">
+            <p class="c-author">{c.author || 'Anonymous'}</p>
+            <p class="c-body">{c.body}</p>
+            <span class="meta">{formatDate(c.created_at)}</span>
+          </div>
+        {/each}
+      </div>
 
-    <div class="composer">
-      <input class="input" bind:value={newComment} placeholder="Add a comment…" onkeydown={(e) => e.key === 'Enter' && submitComment()} disabled={commenting} />
-      <button class="icon-btn" onclick={submitComment} aria-label="Post" disabled={commenting || !newComment.trim()}>
-        <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M1.5 8L14.5 1.5 9.5 14.5l-1.6-5-6.4-1.5z"/>
-        </svg>
-      </button>
+      <div class="composer">
+        <input class="input" bind:value={newComment} placeholder="Add a comment…" onkeydown={(e) => e.key === 'Enter' && submitComment()} disabled={commenting} />
+        <button class="icon-btn" onclick={submitComment} aria-label="Post" disabled={commenting || !newComment.trim()}>
+          <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1.5 8L14.5 1.5 9.5 14.5l-1.6-5-6.4-1.5z"/>
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
 </div>
+
