@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import PostViewer from '$lib/PostViewer.svelte';
   import { fetchPosts, formatDate } from '$lib/api.js';
-  import { signOut } from '$lib/session.svelte.js';
+  import { initSession, signOut } from '$lib/session.svelte.js';
 
   let posts = $state([]);
   let loading = $state(true);
@@ -19,6 +19,9 @@
     window.addEventListener('popstate', () => {
       if (activePost) activePost = null;
     });
+    // Wait for the session to be recovered (token refreshed) before fetching,
+    // otherwise the first request races a stale access token and 401s.
+    await initSession();
     await load();
   });
 
@@ -44,7 +47,13 @@
     refreshing = true;
     try {
       posts = await fetchPosts();
-    } catch {
+    } catch (e) {
+      // Session rejected server-side: drop to the login screen rather than
+      // leave the feed stuck on an error.
+      if (e.message === '401') {
+        await signOutAndReset();
+        return;
+      }
       error = true;
     } finally {
       loading = false;

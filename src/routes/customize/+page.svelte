@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { loadShare, dropShare, uploadShare } from '$lib/share.js';
+  import { initSession } from '$lib/session.svelte.js';
   import exifr from 'exifr';
 
   const id = new URLSearchParams(window.location.search).get('id');
@@ -18,6 +19,7 @@
   let objectUrls = [];
 
   onMount(async () => {
+    await initSession();
     if (!id) {
       failed = true;
       return;

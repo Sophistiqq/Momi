@@ -9,18 +9,36 @@ export const session = $state({
   error: '',
 });
 
-export async function initSession() {
-  const { data } = await supabase.auth.getSession();
-  session.user = data.session ? (data.session.user ?? true) : null;
-  session.ready = true;
-  // Google's redirect lands back with a PKCE code; the exchange happens
-  // after init, so this picks up the resulting session.
+let initPromise;
+
+// Idempotent: the layout kicks this off and any page can await it so the
+// session is fully recovered (token refreshed) before the first fetch.
+export function initSession() {
+  if (!initPromise) initPromise = doInit();
+  return initPromise;
+}
+
+async function doInit() {
+  // Surface auth changes into the UI state. Most importantly: when a token
+  // refresh fails (stale/revoked session), supabase-js emits SIGNED_OUT and
+  // clears the cookie — we must drop to the login screen instead of leaving
+  // the feed stuck on an error.
   supabase.auth.onAuthStateChange((_event, s) => {
-    if (s?.user && !session.user) {
-      session.user = s.user;
-      session.ready = true;
-    }
+    session.user = s?.user ? true : null;
+    session.ready = true;
   });
+
+  const { data } = await supabase.auth.getSession();
+  if (data.session) {
+    // Refresh the access token before the first feed fetch so a stale token
+    // doesn't 401 the very first request. If this fails the session is dead
+    // (the SIGNED_OUT event above logs us out and shows login).
+    const { error } = await supabase.auth.refreshSession();
+    session.user = error ? null : true;
+  } else {
+    session.user = null;
+  }
+  session.ready = true;
 }
 
 export async function signInWithGoogle() {
