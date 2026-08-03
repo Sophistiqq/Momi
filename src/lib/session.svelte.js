@@ -28,31 +28,50 @@ async function doInit() {
     session.ready = true;
   });
 
-  const { data } = await supabase.auth.getSession();
-  if (data.session) {
-    // Refresh the access token before the first feed fetch so a stale token
-    // doesn't 401 the very first request. If this fails the session is dead
-    // (the SIGNED_OUT event above logs us out and shows login).
-    const { error } = await supabase.auth.refreshSession();
-    session.user = error ? null : true;
-  } else {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const s = data.session;
+    if (s) {
+      // Refresh only when the access token is close to expiring so the first
+      // feed fetch can't race a stale token. Valid tokens pass through —
+      // refreshing on every load would rotate the refresh token constantly
+      // and fight across the PWA + browser tabs.
+      const soon = Math.floor(Date.now() / 1000) + 30;
+      if (s.refresh_token && (!s.expires_at || s.expires_at < soon)) {
+        const { error } = await supabase.auth.refreshSession();
+        session.user = error ? null : true;
+      } else {
+        session.user = true;
+      }
+    } else {
+      session.user = null;
+    }
+  } catch {
     session.user = null;
+  } finally {
+    session.ready = true;
   }
-  session.ready = true;
 }
 
 export async function signInWithGoogle() {
   session.error = '';
   session.signingIn = true;
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: location.origin },
-  });
-  session.signingIn = false;
-  if (error) session.error = error.message;
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: location.origin },
+    });
+    if (error) session.error = error.message;
+  } catch (e) {
+    session.error = e?.message || 'Sign-in failed';
+  } finally {
+    session.signingIn = false;
+  }
 }
 
 export async function signOut() {
-  await supabase.auth.signOut();
+  try {
+    await supabase.auth.signOut();
+  } catch {}
   session.user = null;
 }

@@ -39,13 +39,12 @@
   });
 </script>
 
-{#if session.user}
-  <!-- Already authenticated from the cookie: render immediately. -->
-  <slot />
-{:else if !session.ready}
+{#if !session.ready}
   <div class="state show">
     <h2>Loading…</h2>
   </div>
+{:else if session.user}
+  <slot />
 {:else}
   <div class="state login show">
     <h1 class="logo">Moments</h1>
@@ -63,8 +62,6 @@
       <p class="auth-error">{session.error}</p>
     {/if}
   </div>
-{:else}
-  <slot />
 {/if}
 
 <!-- New-version banner: shown when the service worker has an update ready -->
