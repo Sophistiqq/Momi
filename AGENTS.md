@@ -1,33 +1,55 @@
 # AGENTS.md
 
 Moments is a private photo/video journal PWA. Two people share media from
-Android to a feed; both are signed in via Google (Supabase Auth). The repo has
-no build step and no test suite — deploys are the test.
+Android to a feed; both are signed in via Google (Supabase Auth). The frontend
+is a **SvelteKit (Svelte 5) SPA** built to static files with `adapter-static`
+and served by Cloudflare Pages. There is **no test suite — deploys are the
+test**.
 
 ## Stack / architecture
 
-- **`pwa/`** — the static PWA (vanilla JS + Alpine.js, one `index.html` feed +
-  post viewer, one `caption.html` post-share page, `style.css`, `sw.js`).
-  Served by Cloudflare Pages. The domain is `momi-8yq.pages.dev`.
-- **`pwa/_worker.js`** — Cloudflare Pages request handler. Proxies every
-  `/share-target*` request to the Supabase Edge Function, injecting the
-  `SUPABASE_ANON_KEY` env var as a Bearer header. Everything else is served
-  statically via `env.ASSETS`.
+- **`src/`** — SvelteKit app (Svelte 5 runes, no SSR, SPA fallback):
+  - `src/routes/+page.svelte` — the timeline feed + post viewer.
+  - `src/routes/customize/+page.svelte` — post-share preview screen: reads the
+    deferred share from IndexedDB, auto-detects GPS via EXIF (exifr) +
+    reverse-geocodes via Nominatim, collects caption + location, then uploads.
+  - `src/lib/supabase.js` — supabase-js client with a **cookie-backed storage**
+    (see Auth model). `hasStoredSession()` reads the cookie synchronously so
+    the first render never flashes the login page.
+  - `src/lib/session.svelte.js` — shared auth state (Svelte 5 runes).
+  - `src/lib/api.js` — fetch wrappers for the edge function + date helpers.
+  - `src/lib/share.js` — IndexedDB reader for deferred shares + upload helper.
+  - `src/lib/PostViewer.svelte`, `src/lib/actions.js` — viewer + Svelte actions.
+- **`static/`** — copied verbatim into the build: `manifest.json`,
+  `style.css`, `icons/`, `sw.js`, and **`_worker.js`** (Cloudflare Pages
+  request handler; see below).
 - **`supabase/functions/share-target/index.ts`** — Supabase Edge Function
   (Deno). Owns all reads/writes: `POST /share-target` (store shared files +
-  create post), `PATCH .../posts/:id/caption`, `GET|POST .../posts/:id/comments`,
-  `GET /share-target/posts`. Uses the **service role** key for writes and an
-  **anon** client only to validate the caller's session via
-  `supabase.auth.getUser()`.
+  create post, optional `location`), `PATCH .../posts/:id/caption`,
+  `GET|POST .../posts/:id/comments`, `GET /share-target/posts`. Uses the
+  **service role** key for writes and an **anon** client only to validate the
+  caller's session via `supabase.auth.getUser()`.
 - **`supabase/migrations/`** — Postgres schema (SQL, Supabase CLI format).
 - **`supabase/storage`** — `moments` bucket, public-read; object keys are the
   path (`<postId>/<uuid>.<ext>`).
 
+## Upload flow (share → customize → upload)
+
+1. Android share → POST `/share-target` (multipart, no `Accept: application/json`).
+2. **`sw.js` does NOT upload.** It stashes the files + text in IndexedDB
+   (`momi-share` DB, `pending` store) and 303-redirects to
+   `/customize?id=<uuid>`.
+3. The customize page reads the share, shows previews, extracts GPS from the
+   first image's EXIF (exifr) and reverse-geocodes it (Nominatim), lets you
+   edit caption + location, then POSTs multipart back to `/share-target` with
+   `Accept: application/json`. The edge function inserts the post (with
+   `location`) and returns `{ postId }`.
+
 ## Auth model (important)
 
 - The session lives in the `sb-auth-token` **cookie**, not localStorage,
-  because the Android share sheet and caption XHR are plain navigations that
-  can't attach an Authorization header. The cookie is slimmed to
+  because the Android share sheet and customize page are plain navigations
+  that can't attach an Authorization header. The cookie is slimmed to
   access/refresh tokens only (full session with user metadata exceeds Chrome's
   ~4KB cookie limit).
 - The edge function requires a valid session for **every** request (401
@@ -35,14 +57,14 @@ no build step and no test suite — deploys are the test.
   user — never trust an author/client-supplied identity.
 - RLS is enabled on all tables with read-only policies for `authenticated`;
   all writes go through the edge function's service-role client (bypasses RLS).
-- The anon key is public by design (it ships in `pwa/index.html`).
+- The anon key is public by design (it ships in `src/lib/supabase.js`).
 
 ## Developing migrations (tables)
 
 1. Create a new file `supabase/migrations/00NN_short_name.sql`. **Number must
    be the next sequential integer — never reuse one.** A duplicate number
-   makes `supabase db push` fail with a migration-version conflict (this
-   happened: two `0004_*.sql` files). Current max is `0005`.
+   makes `supabase db push` fail with a migration-version conflict. Current
+   max is `0006`.
 2. Use idempotent DDL where it fits: `create table if not exists`,
    `add column if not exists`.
 3. RLS: enable it on new tables and add read policies for `authenticated`
@@ -60,35 +82,38 @@ no build step and no test suite — deploys are the test.
 ## Service worker
 
 - `sw.js` handles the Android share flow: on a POST to `/share-target` (no
-  `Accept: application/json`), it uploads the body straight to the function and
-  303-redirects to `/caption?id=<postId>&ok=1&text=...`. The caption page never
-  re-uploads — it only collects an optional caption for that id.
-- Updates are **manual**: the new SW installs and waits; `index.html` shows an
-  "Update available" banner (polling `registration.update()` every 5 min +
+  `Accept: application/json`), it stores the files in IndexedDB and
+  303-redirects to `/customize?id=<uuid>`. The customize page never re-uploads
+  from the SW — it uploads itself.
+- Updates are **manual**: the new SW installs and waits; the root layout shows
+  an "Update available" banner (polling `registration.update()` every 5 min +
   on `visibilitychange`). Clicking sends `SKIP_WAITING`. Don't re-add
   `skipWaiting()`/auto-reload-on-controllerchange — that was deliberately
   removed as unreliable.
 
 ## Local dev
 
-- Wrangler is a devDependency (`package.json`); `wrangler.jsonc` at the repo
-  root points `pages_build_output_dir` at `pwa/`. Just run:
+- Vite dev with a `/share-target` proxy to the Supabase edge function
+  (injects the anon key from `.dev.vars`, which is gitignored/local-only):
   ```bash
   npm install
-  npm run dev            # wrangler pages dev --ip 0.0.0.0 --port 8788
+  npm run dev            # vite dev --port 8788
   ```
-- `.dev.vars` at the repo root holds `SUPABASE_ANON_KEY` (public; gitignored,
-  local-only). It's only read when wrangler runs with this repo as its config
-  root, so run `npm run dev` from the repo root, not `pwa/`.
-- The `_worker.js` proxy needs that key or every `/share-target` call 401s.
-- `node_modules/`, `.dev.vars`, and `.wrangler/` are gitignored.
+- To test the real production worker (`_worker.js` SPA fallback + proxy):
+  ```bash
+  npm run dev:worker     # vite build && wrangler pages dev build --port 8788
+  ```
+- `build/` is gitignored; `wrangler.jsonc` points `pages_build_output_dir` at
+  `build`.
 
-## Deployment (all automatic on push to `master`)
+## Deployment
 
-- **Cloudflare Pages**: connected to this repo via the dashboard (root dir
-  `pwa`, no build command, output = root). `_worker.js` is picked up
-  automatically. Do NOT run `npx wrangler deploy` — there is no `wrangler.toml`
-  and it fails.
+- **Cloudflare Pages**: connected to this repo via the dashboard. Must be
+  configured with root directory = repo root, build command `npm run build`,
+  output directory `build`, and `NODE_VERSION` = 22 (the `.node-version` file
+  is a hint; Pages reads the env var). `_worker.js` ships in the build output
+  (advanced mode) and is picked up automatically. Do NOT run
+  `npx wrangler deploy` — there is no pages worker config and it fails.
 - **Supabase**: `.github/workflows/deploy-supabase.yml` runs on pushes
   touching `supabase/**` and does `supabase db push` + `supabase functions
   deploy share-target`. Needs the `SUPABASE_ACCESS_TOKEN` GitHub secret
@@ -99,7 +124,10 @@ no build step and no test suite — deploys are the test.
 
 ## Conventions
 
-- No build, no lint, no tests. Keep changes dependency-free — the whole app is
-  CDN Alpine + supabase-js.
+- Svelte 5 runes (`$state`, `$derived`, `$effect`) for all reactive state;
+  shared state lives in `.svelte.js` modules. Keep components dependency-free
+  apart from `@supabase/supabase-js` and `exifr`.
 - Posts land with `status = 'pending_style'`; auto-styling is an explicit
   future pass, not something to build speculatively.
+- Future features in the pipeline (build them in Svelte): memories reels
+  (animated showcases), maps of post locations, richer EXIF usage.

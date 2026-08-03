@@ -28,6 +28,16 @@ export default {
       });
     }
 
+    // SPA fallback: client routes like /customize have no real file, so serve
+    // index.html for navigation/html requests that 404 (SvelteKit does the rest).
+    if (request.mode === 'navigate' || (request.headers.get('accept') || '').includes('text/html')) {
+      const res = await env.ASSETS.fetch(request);
+      if (res.status === 404) {
+        return env.ASSETS.fetch(new Request(url.origin + '/index.html', request));
+      }
+      return res;
+    }
+
     // Everything else: serve static assets from the Pages site.
     return env.ASSETS.fetch(request);
   },

@@ -88,6 +88,7 @@ main { max-width: 640px; margin: 0 auto; padding-bottom: 48px; }
 .post-media .multi { position: absolute; top: 10px; right: 10px; z-index: 1; color: #fff; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .7)); }
 .post-media .play { position: absolute; inset: 0; margin: auto; z-index: 1; color: #fff; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .6)); }
 .post-caption { padding: 10px 4px 0; font-size: .95rem; font-weight: 300; line-height: 1.5; word-break: break-word; }
+.post-location { padding: 4px 4px 0; font-size: .78rem; color: var(--muted); }
 
 /* ---- States ---- */
 .state { display: none; flex-direction: column; align-items: center; gap: 10px; padding: 90px 24px; text-align: center; }
@@ -179,16 +180,21 @@ main { max-width: 640px; margin: 0 auto; padding-bottom: 48px; }
 .composer .input { flex: 1; padding: 10px 14px; }
 .composer .icon-btn { color: var(--accent); width: 38px; height: 38px; flex-shrink: 0; }
 
-/* ---- Caption page ---- */
+/* ---- Customize page ---- */
 .cap-page { display: flex; align-items: center; justify-content: center; padding: 24px; }
 .cap-card {
-  width: 100%; max-width: 400px;
+  width: 100%; max-width: 420px;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); padding: 36px 28px; text-align: center;
+  border-radius: var(--radius-lg); padding: 28px 24px; text-align: center;
 }
-.cap-card .logo { font-size: 1.5rem; margin-bottom: 20px; }
+.cap-card .logo { font-size: 1.4rem; margin-bottom: 8px; }
 .msg { color: var(--accent); font-size: .95rem; margin-bottom: 14px; }
-.cap-card textarea.input { min-height: 90px; text-align: left; }
+.cap-previews { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; max-height: 40vh; overflow-y: auto; }
+.cap-previews img, .cap-previews video { width: 100%; border-radius: var(--radius-sm); background: #000; }
+.cap-card textarea.input { min-height: 80px; text-align: left; margin-bottom: 14px; }
+.cap-label { display: block; text-align: left; font-size: .8rem; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.cap-hint { margin-left: 8px; font-weight: 400; font-style: italic; font-size: .75rem; }
+.cap-card input.input { margin-bottom: 16px; }
 .cap-actions { display: flex; gap: 10px; margin-top: 16px; }
 .cap-actions .btn { flex: 1; }
 

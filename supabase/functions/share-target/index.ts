@@ -99,6 +99,7 @@ function unauthorized(req: Request): Response {
 async function handleShare(req: Request, user: any): Promise<Response> {
   const form = await req.formData();
   const text = (form.get('text') as string) ?? '';
+  const location = (form.get('location') as string) ?? null;
   const files = form.getAll('photos') as File[];
 
   if (files.length === 0) {
@@ -114,6 +115,7 @@ async function handleShare(req: Request, user: any): Promise<Response> {
     author: authorName(user),
     created_at: createdAt,
     status: 'pending_style',
+    location,
   });
   if (postErr) throw postErr;
 
@@ -184,7 +186,7 @@ async function handleAddComment(req: Request, postId: string, user: any): Promis
 async function handleList(): Promise<Response> {
   const { data, error } = await supabase
     .from('posts')
-    .select('id, caption, author, created_at, status, post_media(id, object_key, mime_type, sort_order)')
+    .select('id, caption, author, created_at, status, location, post_media(id, object_key, mime_type, sort_order)')
     .order('created_at', { ascending: false })
     .limit(50);
   if (error) throw error;

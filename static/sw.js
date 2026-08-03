@@ -1,5 +1,5 @@
-const CACHE = 'moments-shell-v4'; // bump to invalidate every phone's cached shell
-const SHELL = ['/', '/manifest.json', '/caption', '/style.css'];
+const CACHE = 'moments-shell-v5'; // bump to invalidate every phone's cached shell
+const SHELL = ['/', '/manifest.json', '/style.css'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -27,14 +27,12 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Android share target: upload the shared files to the function RIGHT HERE
-  // (the SW has the raw body and the session cookie rides along on the
-  // same-origin fetch), then redirect to a pure result page. Doing the upload
-  // in the SW means no form round-trip through the Cache API — that's what
-  // produced empty uploads and hung requests before.
-  // We key off Accept, not request.mode: Chrome doesn't reliably mark
-  // share-target POSTs as 'navigate', but the caption page's own background
-  // requests always send Accept: application/json, which shares never do.
+  // Android share target: do NOT upload yet. Stash the shared files in
+  // IndexedDB and redirect to the customize page, which previews them and
+  // collects caption + location before uploading. Keying off Accept, not
+  // request.mode: Chrome doesn't reliably mark share-target POSTs as
+  // 'navigate', but the customize page's own requests always send
+  // Accept: application/json, which shares never do.
   if (
     event.request.method === 'POST' &&
     url.pathname.startsWith('/share-target') &&
@@ -82,25 +80,48 @@ self.addEventListener('fetch', (event) => {
 });
 
 async function handleShare(request) {
-  const body = await request.arrayBuffer();
   const redirect = (path) => Response.redirect(path, 303);
-  let text = '';
   try {
-    text = (await request.formData()).get('text') || '';
-  } catch {}
-  try {
-    const res = await fetch('/share-target', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': request.headers.get('content-type') || 'multipart/form-data',
-      },
-      body,
+    const form = await request.formData();
+    const text = form.get('text') || '';
+    const files = form.getAll('photos');
+
+    if (!files.length) return redirect('/customize?ok=0');
+
+    const id = crypto.randomUUID();
+    // File objects are structured-cloneable, so blobs survive in IndexedDB.
+    await storeShare(id, {
+      text,
+      files: files.map((f) => ({ name: f.name, type: f.type, blob: f })),
     });
-    const data = await res.json().catch(() => null);
-    if (res.ok && data?.postId) {
-      return redirect(`/caption?id=${data.postId}&ok=1&text=${encodeURIComponent(text)}`);
-    }
-  } catch {}
-  return redirect('/caption?ok=0');
+    return redirect(`/customize?id=${id}`);
+  } catch {
+    return redirect('/customize?ok=0');
+  }
+}
+
+const DB = 'momi-share';
+const DB_VERSION = 1;
+const STORE = 'pending';
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function storeShare(id, share) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(share, id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
