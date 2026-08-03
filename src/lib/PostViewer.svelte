@@ -12,6 +12,7 @@
   let tapAt = 0;
   let pinch = $state({ active: false, dist: 0, scale: 1 });
   let comments = $state<Comment[]>([]);
+  let loadingComments = $state(false);
   let newComment = $state('');
   let commenting = $state(false);
   let editingCaption = $state(false);
@@ -29,9 +30,11 @@
     comments = [];
     editingCaption = false;
     showMenu = false;
+    loadingComments = true;
     fetchComments(post.id)
       .then((c) => (comments = c))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => (loadingComments = false));
   });
 
   onMount(() => {
@@ -218,7 +221,11 @@
         {/if}
 
         <p class="comments-title">Comments</p>
-        {#if !comments.length}
+        {#if loadingComments}
+          <div class="comments-loading">
+            <div class="spinner" style="width:20px;height:20px;border-width:2px"></div>
+          </div>
+        {:else if !comments.length}
           <p class="comments-empty">Be the first to comment.</p>
         {/if}
         {#each comments as c (c.id)}

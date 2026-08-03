@@ -175,6 +175,7 @@ main { max-width: 640px; margin: 0 auto; padding-bottom: 48px; }
 
 .comments-title { margin: 20px 0 8px; text-align: center; font-size: .78rem; font-weight: 500; color: var(--muted); }
 .comments-empty { color: var(--muted); font-size: .88rem; font-style: italic; text-align: center; }
+.comments-loading { display: flex; justify-content: center; padding: 10px 0; }
 .comment { margin: 12px 0; }
 .comment .c-author { font-size: .76rem; font-weight: 700; color: var(--muted); }
 .comment .c-body { font-size: .9rem; line-height: 1.45; word-break: break-word; margin-top: 2px; }
