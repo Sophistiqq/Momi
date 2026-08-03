@@ -6,10 +6,26 @@ export default {
 
     // Share target routes: /share-target, /share-target/posts/:id/caption, /share-target/posts
     if (url.pathname.startsWith('/share-target')) {
-      const headers = new Headers(request.headers);
-      headers.delete('host');
-      headers.delete('authorization');
+      if (!env.SUPABASE_ANON_KEY) {
+        return new Response('Worker Error: SUPABASE_ANON_KEY environment variable is not set in Cloudflare Pages.', {
+          status: 500,
+          headers: { 'Content-Type': 'text/plain' }
+        });
+      }
+
+      const headers = new Headers();
+      // Explicitly forward the auth cookie and other essential request headers
+      const cookie = request.headers.get('cookie');
+      if (cookie) headers.set('cookie', cookie);
+
+      const accept = request.headers.get('accept');
+      if (accept) headers.set('accept', accept);
+
+      const contentType = request.headers.get('content-type');
+      if (contentType) headers.set('content-type', contentType);
+
       headers.set('Authorization', `Bearer ${env.SUPABASE_ANON_KEY}`);
+
       return fetch(SUPABASE_FUNCTION + url.pathname.slice('/share-target'.length), {
         method: request.method,
         headers,
