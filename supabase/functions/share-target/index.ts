@@ -100,6 +100,7 @@ async function handleShare(req: Request, user: any): Promise<Response> {
   const form = await req.formData();
   const text = (form.get('text') as string) ?? '';
   const location = (form.get('location') as string) ?? null;
+  const createdAtForm = form.get('created_at') as string | null;
   const files = form.getAll('photos') as File[];
 
   if (files.length === 0) {
@@ -107,7 +108,7 @@ async function handleShare(req: Request, user: any): Promise<Response> {
   }
 
   const postId = crypto.randomUUID();
-  const createdAt = new Date().toISOString();
+  const createdAt = createdAtForm || new Date().toISOString();
 
   const { error: postErr } = await supabase.from('posts').insert({
     id: postId,

@@ -10,6 +10,7 @@
   let share = $state<PendingShare | null>(null);
   let failed = $state(false);
   let previews = $state<{ url: string; isVideo: boolean }[]>([]);
+  let postDate = $state(toLocalDatetimeString(new Date()));
   let caption = $state('');
   let location = $state('');
   let locationNote = $state('');
@@ -17,6 +18,16 @@
   let posting = $state(false);
   let error = $state('');
   let objectUrls: string[] = [];
+
+  function toLocalDatetimeString(date: Date): string {
+    const pad = (num: number) => String(num).padStart(2, '0');
+    const YYYY = date.getFullYear();
+    const MM = pad(date.getMonth() + 1);
+    const DD = pad(date.getDate());
+    const hh = pad(date.getHours());
+    const mm = pad(date.getMinutes());
+    return `${YYYY}-${MM}-${DD}T${hh}:${mm}`;
+  }
 
   onMount(() => {
     let cleanup: (() => void) | undefined;
@@ -34,7 +45,7 @@
       objectUrls = share.files.map((f) => URL.createObjectURL(f.blob));
       previews = share.files.map((f, i) => ({ url: objectUrls[i], isVideo: f.type.startsWith('video') }));
       caption = share.text || '';
-      detectLocation();
+      detectMetadata();
       cleanup = () => objectUrls.forEach((u) => URL.revokeObjectURL(u));
     })();
     return () => {
@@ -42,9 +53,9 @@
     };
   });
 
-  // Pull GPS from the first photo's EXIF and reverse-geocode it into a place
-  // name. Manual override always wins (the field stays editable).
-  async function detectLocation() {
+  // Pull GPS and date from the first photo's EXIF.
+  // Manual overrides always win.
+  async function detectMetadata() {
     if (!share) return;
     const img = share.files.find((f) => f.type.startsWith('image'));
     if (!img) return;
@@ -64,6 +75,16 @@
       }
     } catch {
       locationNote = 'Could not read photo metadata.';
+    }
+
+    try {
+      const meta = await exifr.parse(img.blob);
+      const rawDate = meta?.DateTimeOriginal || meta?.CreateDate || meta?.ModifyDate;
+      if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+        postDate = toLocalDatetimeString(rawDate);
+      }
+    } catch {
+      // Ignore EXIF date reading error
     } finally {
       detecting = false;
     }
@@ -88,9 +109,9 @@
     nextFiles[targetIndex] = tempFile;
     share.files = nextFiles;
 
-    // Re-detect location if the user hasn't filled it out yet
+    // Re-detect metadata from the new first image if location is still empty
     if (!location) {
-      detectLocation();
+      detectMetadata();
     }
   }
 
@@ -99,7 +120,8 @@
     posting = true;
     error = '';
     try {
-      await uploadShare(share, caption.trim(), location.trim());
+      const isoDate = new Date(postDate).toISOString();
+      await uploadShare(share, caption.trim(), location.trim(), isoDate);
       await dropShare(id);
       goto('/');
     } catch {
@@ -171,6 +193,9 @@
       </div>
 
       <textarea class="input" bind:value={caption} rows={3} placeholder="Write a caption…"></textarea>
+
+      <label class="cap-label" for="date">Date & Time</label>
+      <input class="input" id="date" type="datetime-local" bind:value={postDate} />
 
       <label class="cap-label" for="loc">
         Location

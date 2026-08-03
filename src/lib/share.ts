@@ -53,10 +53,16 @@ export interface UploadResult {
 }
 
 // Upload the pending share with caption + location to the edge function.
-export async function uploadShare(share: PendingShare, caption: string, location: string): Promise<UploadResult> {
+export async function uploadShare(
+  share: PendingShare,
+  caption: string,
+  location: string,
+  createdAt?: string
+): Promise<UploadResult> {
   const form = new FormData();
   form.append('text', caption);
   if (location) form.append('location', location);
+  if (createdAt) form.append('created_at', createdAt);
   for (const f of share.files) {
     form.append('photos', f.blob, f.name);
   }
