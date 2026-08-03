@@ -1,4 +1,4 @@
-const CACHE = 'moments-shell-v3'; // bump to invalidate every phone's cached shell
+const CACHE = 'moments-shell-v4'; // bump to invalidate every phone's cached shell
 const SHELL = ['/', '/manifest.json', '/caption', '/style.css'];
 
 self.addEventListener('install', (event) => {

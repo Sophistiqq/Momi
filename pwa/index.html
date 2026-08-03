@@ -58,32 +58,36 @@
     <p>Share a photo or video from your gallery — it&rsquo;ll land right here.</p>
   </div>
 
-  <!-- Feed: 3-up square grid, Instagram-style -->
-  <div class="feed" x-show="!loading && !error && posts.length">
+  <!-- Feed: vertical timeline, one entry per post -->
+  <div class="timeline" x-show="!loading && !error && posts.length">
     <template x-for="post in posts" :key="post.id">
-      <button class="tile" @click="openPost(post)">
-        <template x-if="isVideo(post)">
-          <video :src="feedSrc(post)" preload="metadata" muted playsinline></video>
-        </template>
-        <template x-if="!isVideo(post) && postMedia(post)">
-          <img :src="postMedia(post).url" :alt="post.caption || ''" loading="lazy" />
-        </template>
-        <svg class="play" x-show="isVideo(post)" viewBox="0 0 24 24" width="44" height="44" fill="currentColor">
-          <circle cx="12" cy="12" r="10.5" fill="rgba(0,0,0,.45)"/>
-          <path d="M10 8.5l6 3.5-6 3.5z"/>
-        </svg>
-        <svg class="multi" x-show="(post.post_media?.length || 0) > 1" viewBox="0 0 16 16"
-             width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5">
-          <rect x="1.6" y="4.6" width="10" height="10" rx="1.8"/><path d="M4.5 1.5h7.9a2.1 2.1 0 0 1 2.1 2.1v7.9"/>
-        </svg>
-      </button>
+      <article class="post" @click="openPost(post)">
+        <time class="post-time" :datetime="post.created_at" x-text="formatDate(post.created_at)"></time>
+        <div class="post-media">
+          <template x-if="isVideo(post)">
+            <video :src="feedSrc(post)" preload="metadata" muted playsinline></video>
+          </template>
+          <template x-if="!isVideo(post) && postMedia(post)">
+            <img :src="postMedia(post).url" :alt="post.caption || ''" loading="lazy" />
+          </template>
+          <svg class="play" x-show="isVideo(post)" viewBox="0 0 24 24" width="44" height="44" fill="currentColor">
+            <circle cx="12" cy="12" r="10.5" fill="rgba(0,0,0,.45)"/>
+            <path d="M10 8.5l6 3.5-6 3.5z"/>
+          </svg>
+          <svg class="multi" x-show="(post.post_media?.length || 0) > 1" viewBox="0 0 16 16"
+               width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="1.6" y="4.6" width="10" height="10" rx="1.8"/><path d="M4.5 1.5h7.9a2.1 2.1 0 0 1 2.1 2.1v7.9"/>
+          </svg>
+        </div>
+        <p class="post-caption" x-show="post.caption" x-text="post.caption"></p>
+      </article>
     </template>
   </div>
 </main>
 
 <!-- Post viewer: full screen on mobile, side-by-side on desktop -->
-<div class="viewer" x-show="user" :class="{ 'open': activePost }" @keydown.escape.window="activePost = null">
-  <div class="viewer-backdrop" @click="activePost = null"></div>
+<div class="viewer" x-show="user" :class="{ 'open': activePost }" @keydown.escape.window="closePost()">
+  <div class="viewer-backdrop" @click="closePost()"></div>
   <template x-if="activePost">
     <div class="viewer-panel">
       <!-- Square stage by default (Instagram-style); tap for the full uncropped image -->
@@ -113,21 +117,20 @@
 
       <div class="info-cell">
         <div class="info-head">
-          <span class="date" x-text="formatDate(activePost.created_at)"></span>
-          <button class="icon-btn" @click="startEditCaption()" aria-label="Edit caption">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M11.3 2.2a1.5 1.5 0 0 1 2.1 2.1L5 12.7l-3 .7.7-3z"/>
-            </svg>
-          </button>
-          <button class="icon-btn" @click="activePost = null" aria-label="Close">✕</button>
+          <span class="info-name" x-text="activePost.author"></span>
+          <div class="menu" @click.outside="showMenu = false">
+            <button class="icon-btn" @click="showMenu = !showMenu" aria-label="Options">⋯</button>
+            <div class="menu-list" x-show="showMenu">
+              <button @click="startEditCaption(); showMenu = false">Edit caption</button>
+            </div>
+          </div>
         </div>
 
         <div class="info-scroll">
           <template x-if="!editingCaption">
-            <div class="comment caption-comment">
-              <p class="author" x-show="activePost.author" x-text="activePost.author"></p>
+            <div class="post-caption">
               <p :class="{ 'muted': !activePost.caption }" x-text="activePost.caption || 'No caption yet'"></p>
-              <span class="meta" x-text="formatDate(activePost.created_at)"></span>
+              <time x-text="formatDateTime(activePost.created_at)"></time>
             </div>
           </template>
           <template x-if="editingCaption">
@@ -145,7 +148,8 @@
           <p class="comments-empty" x-show="!comments.length">Be the first to comment.</p>
           <template x-for="c in comments" :key="c.id">
             <div class="comment">
-              <p><span class="author" x-text="c.author || 'Anonymous'"></span><span x-text="c.body"></span></p>
+              <p class="c-author" x-text="c.author || 'Anonymous'"></p>
+              <p class="c-body" x-text="c.body"></p>
               <span class="meta" x-text="formatDate(c.created_at)"></span>
             </div>
           </template>
@@ -236,7 +240,17 @@
       commenting: false,
       editingCaption: false,
       captionDraft: '',
-      user: null,
+      showMenu: false,
+      user: (function () {
+        // Read the session cookie synchronously so the first render already
+        // knows the user is signed in — no login-page flash.
+        try {
+          const raw = cookieStorage.getItem('sb-auth-token');
+          return raw && JSON.parse(raw)?.access_token ? true : null;
+        } catch {
+          return null;
+        }
+      })(),
       signingIn: false,
       authError: '',
 
@@ -265,6 +279,12 @@
       },
 
       async init() {
+        // Hardware/browser back while the post viewer is open should close the
+        // viewer, not navigate the app away. We push a history entry on open
+        // and pop it on close, so back lands on the popup first.
+        window.addEventListener('popstate', () => {
+          if (this.activePost) this.activePost = null;
+        });
         const { data } = await authClient.auth.getSession();
         // The cookie holds tokens only (user object was slimmed to fit the
         // cookie size limit) and we never display user details, so presence
@@ -316,18 +336,26 @@
       async openPost(post) {
         if (!this.user) return;
         this.activePost = post;
+        history.pushState({ viewer: true }, '');
         this.mediaIndex = 0;
         this.fitMode = false;
         this.zoom = 1;
         this.pinch = { active: false, dist: 0, scale: 1 };
         this.comments = [];
         this.editingCaption = false;
+        this.showMenu = false;
         try {
           const res = await fetch(`/share-target/posts/${post.id}/comments`, {
             headers: { 'Accept': 'application/json' },
           });
           if (res.ok) this.comments = await res.json();
         } catch (e) {}
+      },
+
+      closePost() {
+        if (!this.activePost) return;
+        this.activePost = null;
+        if (history.state?.viewer) history.back();
       },
 
       swipe(dx) {
@@ -452,6 +480,12 @@
 
       formatDate(s) {
         return new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      },
+
+      formatDateTime(s) {
+        return new Date(s).toLocaleString(undefined, {
+          month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+        });
       },
     };
   }
