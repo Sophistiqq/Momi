@@ -73,5 +73,7 @@ export async function signOut(): Promise<void> {
   try {
     await supabase.auth.signOut({ scope: 'local' });
   } catch {}
+  // Force-clear cookie manually in case supabase-js leaves it on error
+  document.cookie = 'sb-auth-token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
   session.user = null;
 }
