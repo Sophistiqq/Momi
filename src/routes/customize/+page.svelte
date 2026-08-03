@@ -69,6 +69,31 @@
     }
   }
 
+  function moveItem(index: number, direction: number) {
+    if (!share) return;
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= previews.length) return;
+
+    // Swap in previews array
+    const nextPreviews = [...previews];
+    const temp = nextPreviews[index];
+    nextPreviews[index] = nextPreviews[targetIndex];
+    nextPreviews[targetIndex] = temp;
+    previews = nextPreviews;
+
+    // Swap in share.files array
+    const nextFiles = [...share.files];
+    const tempFile = nextFiles[index];
+    nextFiles[index] = nextFiles[targetIndex];
+    nextFiles[targetIndex] = tempFile;
+    share.files = nextFiles;
+
+    // Re-detect location if the user hasn't filled it out yet
+    if (!location) {
+      detectLocation();
+    }
+  }
+
   async function post() {
     if (posting || !share || !id) return;
     posting = true;
@@ -113,13 +138,35 @@
       <p class="msg">{previews.length} item{previews.length > 1 ? 's' : ''} ready to post</p>
 
       <div class="cap-previews">
-        {#each previews as p, i (i)}
-          {#if p.isVideo}
-            <!-- svelte-ignore a11y_media_has_caption -->
-            <video src={p.url} controls playsinline></video>
-          {:else}
-            <img src={p.url} alt="Preview {i + 1}" />
-          {/if}
+        {#each previews as p, i (p.url)}
+          <div class="preview-item">
+            {#if p.isVideo}
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <video src={p.url} controls playsinline></video>
+            {:else}
+              <img src={p.url} alt="Preview {i + 1}" />
+            {/if}
+            <div class="preview-controls">
+              <button
+                type="button"
+                class="btn-control"
+                disabled={i === 0}
+                onclick={() => moveItem(i, -1)}
+                title="Move Up"
+              >
+                ▲
+              </button>
+              <button
+                type="button"
+                class="btn-control"
+                disabled={i === previews.length - 1}
+                onclick={() => moveItem(i, 1)}
+                title="Move Down"
+              >
+                ▼
+              </button>
+            </div>
+          </div>
         {/each}
       </div>
 
@@ -142,3 +189,46 @@
     {/if}
   </div>
 </main>
+
+<style>
+  .preview-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .preview-controls {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    padding: 4px;
+    border-radius: 6px;
+    z-index: 10;
+  }
+  .btn-control {
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 0.75rem;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s, opacity 0.2s;
+  }
+  .btn-control:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .btn-control:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+</style>
