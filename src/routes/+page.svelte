@@ -1,13 +1,13 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
   import PostViewer from '$lib/PostViewer.svelte';
-  import { fetchPosts, formatDate } from '$lib/api.js';
-  import { initSession, signOut } from '$lib/session.svelte.js';
+  import { fetchPosts, formatDate, type Media, type Post } from '$lib/api';
+  import { session, initSession, signInWithGoogle, signOut } from '$lib/session.svelte';
 
-  let posts = $state([]);
+  let posts = $state<Post[]>([]);
   let loading = $state(true);
   let error = $state(false);
-  let activePost = $state(null);
+  let activePost = $state<Post | null>(null);
   let refreshing = $state(false);
 
   let countText = $derived(posts.length ? `${posts.length} moment${posts.length > 1 ? 's' : ''}` : '');
@@ -25,16 +25,16 @@
     await load();
   });
 
-  function postMedia(post) {
+  function postMedia(post: Post): Media | null {
     return post?.post_media?.[0] || null;
   }
 
-  function isVideo(post) {
+  function isVideo(post: Post): boolean {
     const m = postMedia(post);
     return !!m && (m.mime_type || '').startsWith('video');
   }
 
-  function feedSrc(post) {
+  function feedSrc(post: Post): string {
     const m = postMedia(post);
     if (!m) return '';
     // #t=0.1 forces Chrome to grab a real frame instead of a black box.
@@ -47,10 +47,10 @@
     refreshing = true;
     try {
       posts = await fetchPosts();
-    } catch (e) {
+    } catch (e: any) {
       // Session rejected server-side: drop to the login screen rather than
       // leave the feed stuck on an error.
-      if (e.message === '401') {
+      if (e?.message === '401') {
         await signOutAndReset();
         return;
       }
@@ -61,77 +61,95 @@
     }
   }
 
-  function openPost(post) {
+  function openPost(post: Post): void {
     activePost = post;
     history.pushState({ viewer: true }, '');
   }
 
-  function closePost() {
+  function closePost(): void {
     if (!activePost) return;
     activePost = null;
     if (history.state?.viewer) history.back();
   }
 
-  async function signOutAndReset() {
+  async function signOutAndReset(): Promise<void> {
     await signOut();
     posts = [];
     activePost = null;
   }
 </script>
 
-<header class="topbar">
-  <h1 class="logo logo-lg">Moments</h1>
-  <div class="topbar-right">
-    <span class="count">{countText}</span>
-    <button class="btn btn-ghost" onclick={signOutAndReset} aria-label="Sign out">Sign out</button>
-    <button class="icon-btn" onclick={load} disabled={loading} aria-label="Refresh">
-      <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class:spin={refreshing}>
-        <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 1.5v3h-3"/>
-      </svg>
-    </button>
-  </div>
-</header>
+<svelte:head>
+  <title>Moments</title>
+</svelte:head>
 
-<main>
-  {#if loading}
-    <div class="state show">
-      <h2>Loading…</h2>
+{#if !session.ready}
+  <div class="state show">
+    <div class="spinner"></div>
+  </div>
+{:else if !session.user}
+  <div class="auth-box">
+    <h1>Moments</h1>
+    <p class="sub">A private journal for two.</p>
+    <button onclick={signInWithGoogle}>Sign in with Google</button>
+  </div>
+{:else}
+  <header class="bar">
+    <div class="title-group">
+      <h1>Moments</h1>
+      {#if countText}<span class="count">{countText}</span>{/if}
     </div>
-  {:else if error}
-    <div class="state show">
-      <h2>Couldn&rsquo;t load</h2>
-      <p>Check your connection and try again.</p>
-      <button class="btn btn-primary" onclick={load}>Try again</button>
+    <div class="bar-actions">
+      <button class="icon-btn" onclick={load} disabled={refreshing} aria-label="Refresh timeline">
+        <svg class:spin={refreshing} viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
+        </svg>
+      </button>
+      <button class="text-btn" onclick={signOutAndReset}>Sign out</button>
     </div>
-  {:else if posts.length === 0}
-    <div class="state show">
-      <h2>Nothing here yet</h2>
-      <p>Share a photo or video from your gallery — it&rsquo;ll land right here.</p>
-    </div>
-  {:else}
-    <!-- Feed: vertical timeline, one entry per post -->
-    <div class="timeline">
-      {#each posts as post (post.id)}
-        <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-        <article
-          class="post"
-          role="button"
-          tabindex="0"
-          onclick={() => openPost(post)}
-          onkeydown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              openPost(post);
-            }
-          }}
-        >
-          <time class="post-time" datetime={post.created_at}>{formatDate(post.created_at)}</time>
-          <div class="post-media">
-            {#if isVideo(post)}
-              <video src={feedSrc(post)} preload="metadata" muted playsinline></video>
-            {:else if postMedia(post)}
-              <img src={postMedia(post).url} alt={post.caption || ''} loading="lazy" />
-            {/if}
+  </header>
+
+  <main class="feed">
+    {#if loading}
+      <div class="state show">
+        <div class="spinner"></div>
+      </div>
+    {:else if error}
+      <div class="state show">
+        <p class="err-text">Could not load timeline.</p>
+        <button onclick={load}>Try again</button>
+      </div>
+    {:else if posts.length === 0}
+      <div class="state show">
+        <p class="empty-text">No moments yet.</p>
+        <p class="empty-sub">Share a photo or video from Android to post the first one.</p>
+      </div>
+    {:else}
+      <div class="timeline">
+        {#each posts as post (post.id)}
+          <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+          <article
+            class="post"
+            role="button"
+            tabindex="0"
+            onclick={() => openPost(post)}
+            onkeydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openPost(post);
+              }
+            }}
+          >
+            <time class="post-time" datetime={post.created_at}>{formatDate(post.created_at)}</time>
+            <div class="post-media">
+              {#if isVideo(post)}
+                <video src={feedSrc(post)} preload="metadata" muted playsinline></video>
+              {:else}
+                {@const m = postMedia(post)}
+                {#if m}
+                  <img src={m.url} alt={post.caption || ''} loading="lazy" />
+                {/if}
+              {/if}
             {#if isVideo(post)}
               <svg class="play" viewBox="0 0 24 24" width="44" height="44" fill="currentColor">
                 <circle cx="12" cy="12" r="10.5" fill="rgba(0,0,0,.45)"/>
@@ -158,4 +176,5 @@
 
 {#if activePost}
   <PostViewer post={activePost} onClose={closePost} />
+{/if}
 {/if}

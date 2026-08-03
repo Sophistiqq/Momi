@@ -1,9 +1,9 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
-  import { fetchComments, addComment, saveCaption, formatDate, formatDateTime } from '$lib/api.js';
-  import { clickOutside } from '$lib/actions.js';
+  import { fetchComments, addComment, saveCaption, formatDate, formatDateTime, type Comment, type Post } from '$lib/api';
+  import { clickOutside } from '$lib/actions';
 
-  let { post, onClose } = $props();
+  let { post, onClose }: { post: Post; onClose: () => void } = $props();
 
   let mediaIndex = $state(0);
   let fitMode = $state(false);
@@ -11,13 +11,13 @@
   let zoom = $state(1);
   let tapAt = 0;
   let pinch = $state({ active: false, dist: 0, scale: 1 });
-  let comments = $state([]);
+  let comments = $state<Comment[]>([]);
   let newComment = $state('');
   let commenting = $state(false);
   let editingCaption = $state(false);
   let captionDraft = $state('');
   let showMenu = $state(false);
-  let mediaCell;
+  let mediaCell: HTMLDivElement | undefined;
 
   $effect(() => {
     // Reset state whenever a (new) post opens.
@@ -35,14 +35,14 @@
   });
 
   onMount(() => {
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  function swipe(dx) {
+  function swipe(dx: number): void {
     const n = post.post_media.length;
     if (Math.abs(dx) < 40) return;
     zoom = 1;
@@ -50,7 +50,7 @@
     clearZoom();
   }
 
-  function onTouchStart(e) {
+  function onTouchStart(e: TouchEvent): void {
     touchX = e.touches[0].clientX;
     if (e.touches.length === 2) {
       const [a, b] = e.touches;
@@ -63,7 +63,7 @@
     }
   }
 
-  function onTouchMove(e) {
+  function onTouchMove(e: TouchEvent): void {
     if (pinch.active && e.touches.length === 2) {
       const [a, b] = e.touches;
       const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -72,7 +72,7 @@
     }
   }
 
-  function onTouchEnd(e) {
+  function onTouchEnd(e: TouchEvent): void {
     if (pinch.active) {
       pinch.active = false;
       return;
@@ -89,7 +89,7 @@
     swipe(e.changedTouches[0].clientX - touchX);
   }
 
-  function onMediaTap() {
+  function onMediaTap(): void {
     if (zoom > 1) {
       zoom = 1;
       clearZoom();
@@ -99,14 +99,14 @@
   }
 
   // Scale the current slide's media around the pinch midpoint.
-  function applyZoom(e) {
+  function applyZoom(e?: TouchEvent): void {
     const slide = mediaCell?.querySelectorAll('.slide')[mediaIndex];
-    const el = slide?.querySelector('img, video');
-    if (!el) return;
+    const el = slide?.querySelector('img, video') as HTMLElement | null;
+    if (!slide || !el) return;
     if (zoom > 1) {
       const r = slide.getBoundingClientRect();
-      const cx = e ? e.touches[0].clientX + (e.touches[1].clientX - e.touches[0].clientX) / 2 : r.width / 2;
-      const cy = e ? e.touches[0].clientY + (e.touches[1].clientY - e.touches[0].clientY) / 2 : r.height / 2;
+      const cx = e && e.touches.length >= 2 ? e.touches[0].clientX + (e.touches[1].clientX - e.touches[0].clientX) / 2 : r.width / 2;
+      const cy = e && e.touches.length >= 2 ? e.touches[0].clientY + (e.touches[1].clientY - e.touches[0].clientY) / 2 : r.height / 2;
       el.style.transformOrigin = cx - r.left + 'px ' + (cy - r.top) + 'px';
       el.style.transform = 'scale(' + zoom + ')';
     } else {
@@ -114,26 +114,26 @@
     }
   }
 
-  function clearZoom() {
+  function clearZoom(): void {
     const slide = mediaCell?.querySelectorAll('.slide')[mediaIndex];
-    const el = slide?.querySelector('img, video');
+    const el = slide?.querySelector('img, video') as HTMLElement | null;
     if (!el) return;
     el.style.transform = '';
     el.style.transformOrigin = '';
   }
 
-  function startEditCaption() {
+  function startEditCaption(): void {
     captionDraft = post.caption || '';
     editingCaption = true;
   }
 
-  async function submitCaption() {
+  async function submitCaption(): Promise<void> {
     await saveCaption(post.id, captionDraft.trim());
     post.caption = captionDraft.trim();
     editingCaption = false;
   }
 
-  async function submitComment() {
+  async function submitComment(): Promise<void> {
     const body = newComment.trim();
     if (!body || commenting) return;
     commenting = true;

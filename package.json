@@ -9,12 +9,15 @@
     "dev": "vite dev --host 0.0.0.0 --port 8788",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 8788",
-    "dev:worker": "vite build && wrangler pages dev build --ip 0.0.0.0 --port 8788"
+    "dev:worker": "vite build && wrangler pages dev build --ip 0.0.0.0 --port 8788",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.70.2",
+    "@types/node": "^26.1.2",
     "svelte": "^5.56.8",
+    "svelte-check": "^4.7.4",
     "vite": "^8.2.0",
     "wrangler": "^4.118.0"
   },

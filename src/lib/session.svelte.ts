@@ -1,4 +1,4 @@
-import { supabase, hasStoredSession } from './supabase.js';
+import { supabase, hasStoredSession } from './supabase';
 
 // Shared auth state (Svelte 5 runes). `user` is null until we know the
 // session state; `ready` flips once the async getSession round-trip lands.
@@ -9,16 +9,16 @@ export const session = $state({
   error: '',
 });
 
-let initPromise;
+let initPromise: Promise<void> | undefined;
 
 // Idempotent: the layout kicks this off and any page can await it so the
 // session is fully recovered (token refreshed) before the first fetch.
-export function initSession() {
+export function initSession(): Promise<void> {
   if (!initPromise) initPromise = doInit();
   return initPromise;
 }
 
-async function doInit() {
+async function doInit(): Promise<void> {
   // Surface auth changes into the UI state. Most importantly: when a token
   // refresh fails (stale/revoked session), supabase-js emits SIGNED_OUT and
   // clears the cookie — we must drop to the login screen instead of leaving
@@ -53,7 +53,7 @@ async function doInit() {
   }
 }
 
-export async function signInWithGoogle() {
+export async function signInWithGoogle(): Promise<void> {
   session.error = '';
   session.signingIn = true;
   try {
@@ -63,13 +63,13 @@ export async function signInWithGoogle() {
     });
     if (error) session.error = error.message;
   } catch (e) {
-    session.error = e?.message || 'Sign-in failed';
+    session.error = e instanceof Error ? e.message : 'Sign-in failed';
   } finally {
     session.signingIn = false;
   }
 }
 
-export async function signOut() {
+export async function signOut(): Promise<void> {
   try {
     await supabase.auth.signOut();
   } catch {}

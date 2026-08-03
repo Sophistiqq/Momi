@@ -1,16 +1,16 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
-  import { session, initSession, signInWithGoogle } from '$lib/session.svelte.js';
+  import { session, initSession, signInWithGoogle } from '$lib/session.svelte';
 
-  let updateBanner;
-  let updateBtn;
+  let updateBanner: HTMLDivElement;
+  let updateBtn: HTMLButtonElement;
   let refreshing = false;
 
   onMount(() => {
     initSession();
 
     if (!('serviceWorker' in navigator)) return;
-    const offer = (sw) => {
+    const offer = (sw: ServiceWorker | null) => {
       if (!sw) return;
       updateBtn.onclick = () => sw.postMessage({ type: 'SKIP_WAITING' });
       updateBanner.hidden = false;

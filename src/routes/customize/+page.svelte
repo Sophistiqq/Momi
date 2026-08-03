@@ -1,44 +1,51 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { loadShare, dropShare, uploadShare } from '$lib/share.js';
-  import { initSession } from '$lib/session.svelte.js';
+  import { loadShare, dropShare, uploadShare, type PendingShare } from '$lib/share';
+  import { initSession } from '$lib/session.svelte';
   import exifr from 'exifr';
 
   const id = new URLSearchParams(window.location.search).get('id');
 
-  let share = $state(null);
+  let share = $state<PendingShare | null>(null);
   let failed = $state(false);
-  let previews = $state([]);
+  let previews = $state<{ url: string; isVideo: boolean }[]>([]);
   let caption = $state('');
   let location = $state('');
   let locationNote = $state('');
   let detecting = $state(false);
   let posting = $state(false);
   let error = $state('');
-  let objectUrls = [];
+  let objectUrls: string[] = [];
 
-  onMount(async () => {
-    await initSession();
-    if (!id) {
-      failed = true;
-      return;
-    }
-    share = await loadShare(id);
-    if (!share || !share.files?.length) {
-      failed = true;
-      return;
-    }
-    objectUrls = share.files.map((f) => URL.createObjectURL(f.blob));
-    previews = share.files.map((f, i) => ({ url: objectUrls[i], isVideo: f.type.startsWith('video') }));
-    caption = share.text || '';
-    detectLocation();
-    return () => objectUrls.forEach((u) => URL.revokeObjectURL(u));
+  onMount(() => {
+    let cleanup: (() => void) | undefined;
+    (async () => {
+      await initSession();
+      if (!id) {
+        failed = true;
+        return;
+      }
+      share = await loadShare(id);
+      if (!share || !share.files?.length) {
+        failed = true;
+        return;
+      }
+      objectUrls = share.files.map((f) => URL.createObjectURL(f.blob));
+      previews = share.files.map((f, i) => ({ url: objectUrls[i], isVideo: f.type.startsWith('video') }));
+      caption = share.text || '';
+      detectLocation();
+      cleanup = () => objectUrls.forEach((u) => URL.revokeObjectURL(u));
+    })();
+    return () => {
+      if (cleanup) cleanup();
+    };
   });
 
   // Pull GPS from the first photo's EXIF and reverse-geocode it into a place
   // name. Manual override always wins (the field stays editable).
   async function detectLocation() {
+    if (!share) return;
     const img = share.files.find((f) => f.type.startsWith('image'));
     if (!img) return;
     detecting = true;
@@ -63,7 +70,7 @@
   }
 
   async function post() {
-    if (posting) return;
+    if (posting || !share || !id) return;
     posting = true;
     error = '';
     try {

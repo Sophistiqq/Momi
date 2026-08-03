@@ -1,10 +1,22 @@
 // Reads a deferred share (written by the service worker) and uploads it.
 // Mirror of the store schema in static/sw.js.
+
+export interface PendingFile {
+  name: string;
+  type: string;
+  blob: Blob;
+}
+
+export interface PendingShare {
+  text: string;
+  files: PendingFile[];
+}
+
 const DB = 'momi-share';
 const DB_VERSION = 1;
 const STORE = 'pending';
 
-function openDb() {
+function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, DB_VERSION);
     req.onupgradeneeded = () => {
@@ -16,17 +28,17 @@ function openDb() {
   });
 }
 
-export async function loadShare(id) {
+export async function loadShare(id: string): Promise<PendingShare | null> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly');
     const req = tx.objectStore(STORE).get(id);
-    req.onsuccess = () => resolve(req.result || null);
+    req.onsuccess = () => resolve((req.result as PendingShare | undefined) || null);
     req.onerror = () => reject(req.error);
   });
 }
 
-export async function dropShare(id) {
+export async function dropShare(id: string): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
@@ -36,8 +48,12 @@ export async function dropShare(id) {
   });
 }
 
+export interface UploadResult {
+  postId: string;
+}
+
 // Upload the pending share with caption + location to the edge function.
-export async function uploadShare(share, caption, location) {
+export async function uploadShare(share: PendingShare, caption: string, location: string): Promise<UploadResult> {
   const form = new FormData();
   form.append('text', caption);
   if (location) form.append('location', location);
