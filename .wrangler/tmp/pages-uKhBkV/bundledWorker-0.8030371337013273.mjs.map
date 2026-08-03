@@ -1,8 +1,0 @@
-{
-  "version": 3,
-  "sources": ["../../../pwa/_worker.js"],
-  "sourceRoot": "C:\\Users\\MIS2\\Desktop\\Momi\\.wrangler\\tmp\\pages-uKhBkV\\bundledWorker-0.8030371337013273.mjs",
-  "sourcesContent": ["const SUPABASE_FUNCTION = 'https://wmouyojmcelxgkwjfpxz.supabase.co/functions/v1/share-target';\n\nexport default {\n  async fetch(request, env) {\n    const url = new URL(request.url);\n\n    // Share target routes: /share-target, /share-target/posts/:id/caption, /share-target/posts\n    if (url.pathname.startsWith('/share-target')) {\n      const headers = new Headers(request.headers);\n      headers.delete('host');\n      headers.delete('authorization');\n      headers.set('Authorization', `Bearer ${env.SUPABASE_ANON_KEY}`);\n      return fetch(SUPABASE_FUNCTION + url.pathname.slice('/share-target'.length), {\n        method: request.method,\n        headers,\n        body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,\n      });\n    }\n\n    // Everything else: serve static assets from the Pages site.\n    return env.ASSETS.fetch(request);\n  },\n};\n"],
-  "mappings": ";AAAA,IAAM,oBAAoB;AAE1B,IAAO,iBAAQ;AAAA,EACb,MAAM,MAAM,SAAS,KAAK;AACxB,UAAM,MAAM,IAAI,IAAI,QAAQ,GAAG;AAG/B,QAAI,IAAI,SAAS,WAAW,eAAe,GAAG;AAC5C,YAAM,UAAU,IAAI,QAAQ,QAAQ,OAAO;AAC3C,cAAQ,OAAO,MAAM;AACrB,cAAQ,OAAO,eAAe;AAC9B,cAAQ,IAAI,iBAAiB,UAAU,IAAI,iBAAiB,EAAE;AAC9D,aAAO,MAAM,oBAAoB,IAAI,SAAS,MAAM,gBAAgB,MAAM,GAAG;AAAA,QAC3E,QAAQ,QAAQ;AAAA,QAChB;AAAA,QACA,MAAM,CAAC,OAAO,MAAM,EAAE,SAAS,QAAQ,MAAM,IAAI,SAAY,QAAQ;AAAA,MACvE,CAAC;AAAA,IACH;AAGA,WAAO,IAAI,OAAO,MAAM,OAAO;AAAA,EACjC;AACF;",
-  "names": []
-}
