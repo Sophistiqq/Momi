@@ -6,9 +6,9 @@
   let updateBtn: HTMLButtonElement;
   let refreshing = false;
 
-  onMount(() => {
-    initSession();
+  initSession();
 
+  onMount(() => {
     if (!('serviceWorker' in navigator)) return;
     const offer = (sw: ServiceWorker | null) => {
       if (!sw) return;
