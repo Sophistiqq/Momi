@@ -25,7 +25,8 @@ const cookieStorage = {
         });
       }
     } catch {}
-    document.cookie = key + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000; SameSite=Lax; Secure';
+    const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = key + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000; SameSite=Lax' + secure;
   },
   removeItem(key: string): void {
     document.cookie = key + '=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
