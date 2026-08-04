@@ -278,6 +278,7 @@ async function handleList(req: Request): Promise<Response> {
       ...m,
       url: `https://wmouyojmcelxgkwjfpxz.supabase.co/storage/v1/object/public/moments/${m.object_key}`,
     })),
+  }));
   return Response.json(rows);
 }
 
