@@ -18,46 +18,54 @@ const BUCKET = Deno.env.get('MOMENTS_BUCKET') ?? 'moments';
 const TOKEN_COOKIE = 'sb-auth-token';
 
 Deno.serve(async (req) => {
-  const url = new URL(req.url);
-  const user = await getUser(req);
-  if (!user) return unauthorized(req);
+  try {
+    const url = new URL(req.url);
+    const user = await getUser(req);
+    if (!user) return unauthorized(req);
 
-  // Android's share sheet does a real browser navigation: POST multipart/form-data
-  // straight to this URL. We store the files, create a "pending_style" post,
-  // and respond with an HTML page (not JSON) since this is a page load, not a fetch.
-  if (req.method === 'POST' && url.pathname.endsWith('/share-target')) {
-    return handleShare(req, user);
-  }
+    // Android's share sheet does a real browser navigation: POST multipart/form-data
+    // straight to this URL. We store the files, create a "pending_style" post,
+    // and respond with an HTML page (not JSON) since this is a page load, not a fetch.
+    if (req.method === 'POST' && url.pathname.endsWith('/share-target')) {
+      return handleShare(req, user);
+    }
 
-  // Update/Delete/Restore a post.
-  const postMatch = url.pathname.match(/\/share-target\/posts\/([^/]+)$/);
-  if (req.method === 'PATCH' && postMatch) {
-    return handleUpdatePost(req, postMatch[1]);
-  }
-  if (req.method === 'DELETE' && postMatch) {
-    return handleDeletePost(postMatch[1]);
-  }
+    // Update/Delete/Restore a post.
+    const postMatch = url.pathname.match(/\/share-target\/posts\/([^/]+)$/);
+    if (req.method === 'PATCH' && postMatch) {
+      return handleUpdatePost(req, postMatch[1]);
+    }
+    if (req.method === 'DELETE' && postMatch) {
+      return handleDeletePost(postMatch[1]);
+    }
 
-  // Lets either of you fix the caption right after upload, or later from the feed.
-  const captionMatch = url.pathname.match(/\/share-target\/posts\/([^/]+)\/caption$/);
-  if (req.method === 'PATCH' && captionMatch) {
-    return handleUpdatePost(req, captionMatch[1]);
-  }
+    // Lets either of you fix the caption right after upload, or later from the feed.
+    const captionMatch = url.pathname.match(/\/share-target\/posts\/([^/]+)\/caption$/);
+    if (req.method === 'PATCH' && captionMatch) {
+      return handleUpdatePost(req, captionMatch[1]);
+    }
 
-  // Comments on a post.
-  const commentsMatch = url.pathname.match(/\/share-target\/posts\/([^/]+)\/comments$/);
-  if (req.method === 'GET' && commentsMatch) {
-    return handleComments(commentsMatch[1]);
-  }
-  if (req.method === 'POST' && commentsMatch) {
-    return handleAddComment(req, commentsMatch[1], user);
-  }
+    // Comments on a post.
+    const commentsMatch = url.pathname.match(/\/share-target\/posts\/([^/]+)\/comments$/);
+    if (req.method === 'GET' && commentsMatch) {
+      return handleComments(commentsMatch[1]);
+    }
+    if (req.method === 'POST' && commentsMatch) {
+      return handleAddComment(req, commentsMatch[1], user);
+    }
 
-  if (req.method === 'GET' && url.pathname.endsWith('/share-target/posts')) {
-    return handleList(req);
-  }
+    if (req.method === 'GET' && url.pathname.endsWith('/share-target/posts')) {
+      return handleList(req);
+    }
 
-  return new Response('Not found', { status: 404 });
+    return new Response('Not found', { status: 404 });
+  } catch (err: any) {
+    console.error('Unhandled error:', err);
+    return Response.json(
+      { error: err?.message ?? String(err) },
+      { status: 500 }
+    );
+  }
 });
 
 // Extract the access_token from the session cookie and verify it against
