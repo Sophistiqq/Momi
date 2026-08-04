@@ -1,4 +1,4 @@
-const CACHE = 'moments-shell-v5'; // bump to invalidate every phone's cached shell
+const CACHE = 'moments-shell-v6'; // bump to invalidate every phone's cached shell
 const MEDIA_CACHE = 'moments-media';
 const SHELL = ['/', '/manifest.json', '/style.css'];
 
@@ -45,6 +45,11 @@ self.addEventListener('fetch', (event) => {
 
   if (event.request.method !== 'GET') return;
 
+  // API calls to the edge function: always network-only, never cache.
+  // These are dynamic JSON responses (post list, comments) that must always
+  // reflect the current database state — stale data here means ghost posts.
+  if (url.pathname.startsWith('/share-target')) return;
+
   // Media requests from Supabase public storage bucket: cache-first
   const isMediaRequest = url.origin === 'https://wmouyojmcelxgkwjfpxz.supabase.co' && url.pathname.includes('/storage/v1/object/public/');
   if (isMediaRequest) {
@@ -80,9 +85,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Assets (manifest, icons, style.css): stale-while-revalidate. Serve the cached
-  // copy immediately, refresh it in the background. Range requests (video
-  // seeking) go straight to the network — caching a 206 would corrupt playback.
+  // Static assets (manifest, icons, style.css): stale-while-revalidate.
+  // Range requests (video seeking) go straight to the network.
   if (event.request.headers.has('range')) return;
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
