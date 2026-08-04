@@ -133,10 +133,21 @@
   }
 
   async function submitPost(): Promise<void> {
-    const ok = await updatePost(post.id, { caption: captionDraft.trim(), location: locationDraft.trim() });
+    const location = locationDraft.trim();
+    const changedLocation = location !== post.location;
+    const ok = await updatePost(post.id, {
+      caption: captionDraft.trim(),
+      location,
+      lat: changedLocation ? null : undefined,
+      lng: changedLocation ? null : undefined,
+    });
     if (ok) {
       post.caption = captionDraft.trim();
-      post.location = locationDraft.trim();
+      post.location = location;
+      if (changedLocation) {
+        post.lat = null;
+        post.lng = null;
+      }
     }
     editingPost = false;
   }
@@ -157,6 +168,11 @@
       if (onRestore) onRestore(post.id);
       onClose();
     }
+  }
+
+  function mapsHref(post: Post): string {
+    const q = post.lat != null && post.lng != null ? `${post.lat},${post.lng}` : (post.location ?? '');
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
   }
 
   async function submitComment(): Promise<void> {
@@ -183,7 +199,7 @@
       <div class="info-head-text">
         <span class="info-name">{post.author}</span>
         {#if post.location}
-          <span class="info-loc">{post.location.split(',')[0].trim()}</span>
+          <a class="info-loc" href={mapsHref(post)} target="_blank" rel="noopener noreferrer">{post.location.split(',')[0].trim()}</a>
         {/if}
       </div>
       <div class="info-actions">
@@ -244,9 +260,6 @@
             <div class="post-caption">
               <p class:muted={!post.caption}>{post.caption || 'No caption yet'}</p>
               <time>{formatDateTime(post.created_at)}</time>
-              {#if post.location}
-                <p class="post-location">{post.location}</p>
-              {/if}
             </div>
           {:else}
             <div>

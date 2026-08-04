@@ -13,6 +13,8 @@
   let postDate = $state(toLocalDatetimeString(new Date()));
   let caption = $state('');
   let location = $state('');
+  let lat = $state<number | null>(null);
+  let lng = $state<number | null>(null);
   let locationNote = $state('');
   let detecting = $state(false);
   let posting = $state(false);
@@ -63,6 +65,8 @@
     try {
       const gps = await exifr.gps(img.blob);
       if (gps?.latitude != null && gps?.longitude != null) {
+        lat = gps.latitude;
+        lng = gps.longitude;
         locationNote = `${gps.latitude.toFixed(5)}, ${gps.longitude.toFixed(5)}`;
         location = locationNote;
         try {
@@ -130,7 +134,7 @@
     error = '';
     try {
       const isoDate = new Date(postDate).toISOString();
-      await uploadShare(share, caption.trim(), location.trim(), isoDate);
+      await uploadShare(share, caption.trim(), location.trim(), isoDate, lat, lng);
       await dropShare(id);
       goto('/');
     } catch {
@@ -211,7 +215,7 @@
         {#if detecting}<span class="cap-hint">detecting…</span>{/if}
         {#if locationNote}<span class="cap-hint">{locationNote}</span>{/if}
       </label>
-      <input class="input" id="loc" bind:value={location} placeholder="Add a place…" />
+      <input class="input" id="loc" bind:value={location} oninput={() => { lat = null; lng = null; }} placeholder="Add a place…" />
 
       {#if error}<p class="auth-error">{error}</p>{/if}
 

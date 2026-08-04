@@ -96,6 +96,13 @@ function authorName(user: any) {
   );
 }
 
+// Form values arrive as strings; null stays null.
+function parseCoord(v: FormDataEntryValue | null): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function unauthorized(req: Request): Response {
   if ((req.headers.get('accept') ?? '').includes('application/json')) {
     return Response.json({ error: 'unauthorized' }, { status: 401 });
@@ -117,6 +124,8 @@ async function handleShare(req: Request, user: any): Promise<Response> {
   const form = await req.formData();
   const text = (form.get('text') as string) ?? '';
   const location = (form.get('location') as string) ?? null;
+  const lat = parseCoord(form.get('lat'));
+  const lng = parseCoord(form.get('lng'));
   const createdAtForm = form.get('created_at') as string | null;
   const files = form.getAll('photos') as File[];
 
@@ -134,6 +143,8 @@ async function handleShare(req: Request, user: any): Promise<Response> {
     created_at: createdAt,
     status: 'pending_style',
     location,
+    lat,
+    lng,
   });
   if (postErr) throw postErr;
 
@@ -167,11 +178,13 @@ async function handleShare(req: Request, user: any): Promise<Response> {
 }
 
 async function handleUpdatePost(req: Request, postId: string): Promise<Response> {
-  const { caption, location, status } = await req.json();
+  const { caption, location, status, lat, lng } = await req.json();
   const updateData: any = {};
   if (caption !== undefined) updateData.caption = caption;
   if (location !== undefined) updateData.location = location;
   if (status !== undefined) updateData.status = status;
+  if (lat !== undefined) updateData.lat = lat;
+  if (lng !== undefined) updateData.lng = lng;
 
   const { error } = await supabase
     .from('posts')
@@ -267,7 +280,7 @@ async function handleList(req: Request): Promise<Response> {
 
   let query = supabase
     .from('posts')
-    .select('id, caption, author, created_at, status, location, post_media(id, object_key, mime_type, sort_order)')
+    .select('id, caption, author, created_at, status, location, lat, lng, post_media(id, object_key, mime_type, sort_order)')
     .order('created_at', { ascending: false })
     .limit(50);
 

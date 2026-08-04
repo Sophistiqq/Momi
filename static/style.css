@@ -159,7 +159,8 @@ main { max-width: 640px; margin: 0 auto; padding-bottom: 48px; }
 .info-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px 10px 18px; border-bottom: 1px solid var(--border); }
 .info-head-text { display: flex; flex-direction: column; }
 .info-name { font-weight: 700; font-size: .95rem; }
-.info-loc { font-size: .75rem; color: var(--muted); margin-top: 1px; }
+.info-loc { font-size: .75rem; color: var(--muted); margin-top: 1px; text-decoration: none; }
+.info-loc:active { opacity: .6; }
 .info-actions { display: flex; align-items: center; gap: 12px; }
 .close-btn { font-size: 1.15rem; font-weight: 300; opacity: 0.8; transition: opacity 0.2s; }
 .close-btn:hover { opacity: 1; }

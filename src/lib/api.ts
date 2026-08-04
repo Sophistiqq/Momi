@@ -16,6 +16,8 @@ export interface Post {
   created_at: string;
   status: string;
   location?: string | null;
+  lat?: number | null;
+  lng?: number | null;
   post_media: Media[];
 }
 
@@ -51,7 +53,7 @@ export async function addComment(postId: string, body: string): Promise<boolean>
 
 export async function updatePost(
   postId: string,
-  fields: { caption?: string; location?: string; status?: string }
+  fields: { caption?: string; location?: string; status?: string; lat?: number | null; lng?: number | null }
 ): Promise<boolean> {
   const res = await fetch(`/share-target/posts/${postId}`, {
     method: 'PATCH',

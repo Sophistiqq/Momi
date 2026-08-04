@@ -57,12 +57,16 @@ export async function uploadShare(
   share: PendingShare,
   caption: string,
   location: string,
-  createdAt?: string
+  createdAt?: string,
+  lat?: number | null,
+  lng?: number | null
 ): Promise<UploadResult> {
   const form = new FormData();
   form.append('text', caption);
   if (location) form.append('location', location);
   if (createdAt) form.append('created_at', createdAt);
+  if (lat != null) form.append('lat', String(lat));
+  if (lng != null) form.append('lng', String(lng));
   for (const f of share.files) {
     form.append('photos', f.blob, f.name);
   }
