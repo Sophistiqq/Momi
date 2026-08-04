@@ -9,8 +9,9 @@
   let error = $state(false);
   let activePost = $state<Post | null>(null);
   let refreshing = $state(false);
+  let showTrash = $state(false);
 
-  let countText = $derived(posts.length ? `${posts.length} moment${posts.length > 1 ? 's' : ''}` : '');
+  let countText = $derived(posts.length ? `${posts.length} moment${posts.length > 1 ? 's' : ''}${showTrash ? ' in trash' : ''}` : '');
 
   onMount(async () => {
     // Hardware/browser back while the post viewer is open should close the
@@ -46,7 +47,7 @@
     error = false;
     refreshing = true;
     try {
-      posts = await fetchPosts();
+      posts = await fetchPosts(showTrash ? 'trash' : undefined);
     } catch (e: any) {
       // Session rejected server-side: drop to the login screen rather than
       // leave the feed stuck on an error.
@@ -59,6 +60,19 @@
       loading = false;
       refreshing = false;
     }
+  }
+
+  async function toggleTrash() {
+    showTrash = !showTrash;
+    await load();
+  }
+
+  function handleDeletePost(postId: string) {
+    posts = posts.filter((p) => p.id !== postId);
+  }
+
+  function handleRestorePost(postId: string) {
+    posts = posts.filter((p) => p.id !== postId);
   }
 
   function openPost(post: Post): void {
@@ -91,9 +105,20 @@
   <!-- Auth is handled in +layout.svelte; this branch should not render -->
 {:else}
   <header class="topbar">
-    <span class="logo logo-lg">Moments</span>
+    <span class="logo logo-lg">{showTrash ? 'Trash' : 'Moments'}</span>
     <div class="topbar-right">
       {#if countText}<span class="count">{countText}</span>{/if}
+      <button class="icon-btn" class:active={showTrash} onclick={toggleTrash} aria-label={showTrash ? "Show Feed" : "Show Trash"} title={showTrash ? "Back to Feed" : "View Trash"}>
+        {#if showTrash}
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1.5 8h13M1.5 8l4-4M1.5 8l4 4"/>
+          </svg>
+        {:else}
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2.5 3.5h11M5.5 3.5v-1a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1m-7 0v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-10M6.5 6.5v5m3-5v5"/>
+          </svg>
+        {/if}
+      </button>
       <button class="icon-btn" onclick={load} disabled={refreshing} aria-label="Refresh">
         <svg class:spin={refreshing} viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
           <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 1.5v3h-3"/>
@@ -116,8 +141,8 @@
       </div>
     {:else if posts.length === 0}
       <div class="state show">
-        <h2>Nothing here yet</h2>
-        <p>Share a photo or video from your gallery — it&rsquo;ll land right here.</p>
+        <h2>{showTrash ? 'Trash is empty' : 'Nothing here yet'}</h2>
+        <p>{showTrash ? 'Your deleted moments will appear here.' : 'Share a photo or video from your gallery — it&rsquo;ll land right here.'}</p>
       </div>
     {:else}
       <div class="timeline">
@@ -170,6 +195,6 @@
   </main>
 
   {#if activePost}
-    <PostViewer post={activePost} onClose={closePost} />
+    <PostViewer post={activePost} onClose={closePost} onDelete={handleDeletePost} onRestore={handleRestorePost} />
   {/if}
 {/if}

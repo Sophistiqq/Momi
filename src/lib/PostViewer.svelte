@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { fetchComments, addComment, saveCaption, formatDate, formatDateTime, type Comment, type Post } from '$lib/api';
+  import { fetchComments, addComment, updatePost, deletePost, formatDate, formatDateTime, type Comment, type Post } from '$lib/api';
   import { clickOutside } from '$lib/actions';
 
-  let { post, onClose }: { post: Post; onClose: () => void } = $props();
+  let { post, onClose, onDelete, onRestore }: { post: Post; onClose: () => void; onDelete?: (id: string) => void; onRestore?: (id: string) => void } = $props();
 
   let mediaIndex = $state(0);
   let fitMode = $state(false);
@@ -15,8 +15,9 @@
   let loadingComments = $state(false);
   let newComment = $state('');
   let commenting = $state(false);
-  let editingCaption = $state(false);
+  let editingPost = $state(false);
   let captionDraft = $state('');
+  let locationDraft = $state('');
   let showMenu = $state(false);
   let mediaCell: HTMLDivElement | undefined;
 
@@ -28,7 +29,7 @@
     zoom = 1;
     pinch = { active: false, dist: 0, scale: 1 };
     comments = [];
-    editingCaption = false;
+    editingPost = false;
     showMenu = false;
     loadingComments = true;
     fetchComments(post.id)
@@ -125,15 +126,37 @@
     el.style.transformOrigin = '';
   }
 
-  function startEditCaption(): void {
+  function startEditPost(): void {
     captionDraft = post.caption || '';
-    editingCaption = true;
+    locationDraft = post.location || '';
+    editingPost = true;
   }
 
-  async function submitCaption(): Promise<void> {
-    await saveCaption(post.id, captionDraft.trim());
-    post.caption = captionDraft.trim();
-    editingCaption = false;
+  async function submitPost(): Promise<void> {
+    const ok = await updatePost(post.id, { caption: captionDraft.trim(), location: locationDraft.trim() });
+    if (ok) {
+      post.caption = captionDraft.trim();
+      post.location = locationDraft.trim();
+    }
+    editingPost = false;
+  }
+
+  async function handleDelete(): Promise<void> {
+    const isTrash = post.status === 'trash';
+    if (!confirm(isTrash ? 'Permanently delete this post? This cannot be undone.' : 'Move this post to Trash?')) return;
+    const ok = await deletePost(post.id);
+    if (ok) {
+      if (onDelete) onDelete(post.id);
+      onClose();
+    }
+  }
+
+  async function handleRestore(): Promise<void> {
+    const ok = await updatePost(post.id, { status: 'pending_style' });
+    if (ok) {
+      if (onRestore) onRestore(post.id);
+      onClose();
+    }
   }
 
   async function submitComment(): Promise<void> {
@@ -168,7 +191,13 @@
           <button class="icon-btn" onclick={() => (showMenu = !showMenu)} aria-label="Options">⋯</button>
           {#if showMenu}
             <div class="menu-list">
-              <button onclick={() => { startEditCaption(); showMenu = false; }}>Edit caption</button>
+              <button onclick={() => { startEditPost(); showMenu = false; }}>Edit post</button>
+              {#if post.status === 'trash'}
+                <button onclick={() => { handleRestore(); showMenu = false; }} style="color: var(--primary);">Restore post</button>
+                <button onclick={() => { handleDelete(); showMenu = false; }} style="color: #ff5e5e;">Delete permanently</button>
+              {:else}
+                <button onclick={() => { handleDelete(); showMenu = false; }} style="color: #ff5e5e;">Move to Trash</button>
+              {/if}
             </div>
           {/if}
         </div>
@@ -211,7 +240,7 @@
 
       <div class="info-cell">
         <div class="info-scroll">
-          {#if !editingCaption}
+          {#if !editingPost}
             <div class="post-caption">
               <p class:muted={!post.caption}>{post.caption || 'No caption yet'}</p>
               <time>{formatDateTime(post.created_at)}</time>
@@ -221,10 +250,11 @@
             </div>
           {:else}
             <div>
-              <textarea class="input" bind:value={captionDraft} rows={3} placeholder="Write a caption…" onkeydown={(e) => e.ctrlKey && e.key === 'Enter' && submitCaption()}></textarea>
-              <div class="caption-edit-actions">
-                <button class="btn btn-ghost" onclick={() => (editingCaption = false)}>Cancel</button>
-                <button class="btn btn-primary" onclick={submitCaption}>Save</button>
+              <textarea class="input" bind:value={captionDraft} rows={3} placeholder="Write a caption…" onkeydown={(e) => e.ctrlKey && e.key === 'Enter' && submitPost()}></textarea>
+              <input class="input" bind:value={locationDraft} placeholder="Add a place…" style="margin-top: 8px;" onkeydown={(e) => e.ctrlKey && e.key === 'Enter' && submitPost()} />
+              <div class="caption-edit-actions" style="margin-top: 8px; display: flex; gap: 8px;">
+                <button class="btn btn-ghost" onclick={() => (editingPost = false)}>Cancel</button>
+                <button class="btn btn-primary" onclick={submitPost}>Save</button>
               </div>
             </div>
           {/if}

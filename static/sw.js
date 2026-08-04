@@ -1,4 +1,5 @@
 const CACHE = 'moments-shell-v5'; // bump to invalidate every phone's cached shell
+const MEDIA_CACHE = 'moments-media';
 const SHELL = ['/', '/manifest.json', '/style.css'];
 
 self.addEventListener('install', (event) => {
@@ -18,7 +19,7 @@ self.addEventListener('message', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k !== CACHE && k !== MEDIA_CACHE).map((k) => caches.delete(k)))
     )
   );
   event.waitUntil(self.clients.claim());
@@ -44,6 +45,24 @@ self.addEventListener('fetch', (event) => {
 
   if (event.request.method !== 'GET') return;
 
+  // Media requests from Supabase public storage bucket: cache-first
+  const isMediaRequest = url.origin === 'https://wmouyojmcelxgkwjfpxz.supabase.co' && url.pathname.includes('/storage/v1/object/public/');
+  if (isMediaRequest) {
+    if (event.request.headers.has('range')) return;
+    event.respondWith(
+      caches.open(MEDIA_CACHE).then(async (cache) => {
+        const cached = await cache.match(event.request);
+        if (cached) return cached;
+        const network = await fetch(event.request);
+        if (network.ok && (network.status === 200 || network.status === 304)) {
+          cache.put(event.request, network.clone());
+        }
+        return network;
+      })
+    );
+    return;
+  }
+
   // Pages: network-first, so every deploy is immediately visible online;
   // cache only as an offline fallback.
   if (event.request.mode === 'navigate') {
@@ -61,7 +80,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Assets (manifest, icons, media): stale-while-revalidate. Serve the cached
+  // Assets (manifest, icons, style.css): stale-while-revalidate. Serve the cached
   // copy immediately, refresh it in the background. Range requests (video
   // seeking) go straight to the network — caching a 206 would corrupt playback.
   if (event.request.headers.has('range')) return;

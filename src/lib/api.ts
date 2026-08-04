@@ -27,8 +27,9 @@ export interface Comment {
   created_at: string;
 }
 
-export async function fetchPosts(): Promise<Post[]> {
-  const res = await fetch('/share-target/posts', { headers: { Accept: 'application/json' } });
+export async function fetchPosts(status?: string): Promise<Post[]> {
+  const url = status ? `/share-target/posts?status=${status}` : '/share-target/posts';
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(String(res.status));
   return res.json();
 }
@@ -48,11 +49,22 @@ export async function addComment(postId: string, body: string): Promise<boolean>
   return res.ok;
 }
 
-export async function saveCaption(postId: string, caption: string): Promise<boolean> {
-  const res = await fetch(`/share-target/posts/${postId}/caption`, {
+export async function updatePost(
+  postId: string,
+  fields: { caption?: string; location?: string; status?: string }
+): Promise<boolean> {
+  const res = await fetch(`/share-target/posts/${postId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ caption }),
+    body: JSON.stringify(fields),
+  });
+  return res.ok;
+}
+
+export async function deletePost(postId: string): Promise<boolean> {
+  const res = await fetch(`/share-target/posts/${postId}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json' },
   });
   return res.ok;
 }

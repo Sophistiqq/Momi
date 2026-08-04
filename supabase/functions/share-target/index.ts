@@ -29,10 +29,19 @@ Deno.serve(async (req) => {
     return handleShare(req, user);
   }
 
+  // Update/Delete/Restore a post.
+  const postMatch = url.pathname.match(/\/share-target\/posts\/([^/]+)$/);
+  if (req.method === 'PATCH' && postMatch) {
+    return handleUpdatePost(req, postMatch[1]);
+  }
+  if (req.method === 'DELETE' && postMatch) {
+    return handleDeletePost(postMatch[1]);
+  }
+
   // Lets either of you fix the caption right after upload, or later from the feed.
   const captionMatch = url.pathname.match(/\/share-target\/posts\/([^/]+)\/caption$/);
   if (req.method === 'PATCH' && captionMatch) {
-    return handleCaption(req, captionMatch[1]);
+    return handleUpdatePost(req, captionMatch[1]);
   }
 
   // Comments on a post.
@@ -45,7 +54,7 @@ Deno.serve(async (req) => {
   }
 
   if (req.method === 'GET' && url.pathname.endsWith('/share-target/posts')) {
-    return handleList();
+    return handleList(req);
   }
 
   return new Response('Not found', { status: 404 });
@@ -149,14 +158,73 @@ async function handleShare(req: Request, user: any): Promise<Response> {
   return renderPage(`Saved ${files.length} item(s).`, postId, text);
 }
 
-async function handleCaption(req: Request, postId: string): Promise<Response> {
-  const { caption } = await req.json();
+async function handleUpdatePost(req: Request, postId: string): Promise<Response> {
+  const { caption, location, status } = await req.json();
+  const updateData: any = {};
+  if (caption !== undefined) updateData.caption = caption;
+  if (location !== undefined) updateData.location = location;
+  if (status !== undefined) updateData.status = status;
+
   const { error } = await supabase
     .from('posts')
-    .update({ caption })
+    .update(updateData)
     .eq('id', postId);
   if (error) throw error;
   return Response.json({ ok: true });
+}
+
+async function handleDeletePost(postId: string): Promise<Response> {
+  const { data: post, error: getErr } = await supabase
+    .from('posts')
+    .select('status')
+    .eq('id', postId)
+    .single();
+  if (getErr) throw getErr;
+
+  if (post && post.status === 'trash') {
+    // Hard delete post_media, comments, and post from DB and Storage
+    const { data: media, error: mediaErr } = await supabase
+      .from('post_media')
+      .select('object_key')
+      .eq('post_id', postId);
+    if (mediaErr) throw mediaErr;
+
+    if (media && media.length > 0) {
+      const keys = media.map((m) => m.object_key);
+      const { error: storageErr } = await supabase.storage
+        .from(BUCKET)
+        .remove(keys);
+      if (storageErr) console.error('Failed to remove storage objects:', storageErr);
+    }
+
+    const { error: delMediaErr } = await supabase
+      .from('post_media')
+      .delete()
+      .eq('post_id', postId);
+    if (delMediaErr) throw delMediaErr;
+
+    const { error: delCommentsErr } = await supabase
+      .from('comments')
+      .delete()
+      .eq('post_id', postId);
+    if (delCommentsErr) throw delCommentsErr;
+
+    const { error: delPostErr } = await supabase
+      .from('posts')
+      .delete()
+      .eq('id', postId);
+    if (delPostErr) throw delPostErr;
+
+    return Response.json({ ok: true, permanent: true });
+  } else {
+    // Soft delete: update status to trash
+    const { error } = await supabase
+      .from('posts')
+      .update({ status: 'trash' })
+      .eq('id', postId);
+    if (error) throw error;
+    return Response.json({ ok: true, permanent: false });
+  }
 }
 
 async function handleComments(postId: string): Promise<Response> {
@@ -180,16 +248,28 @@ async function handleAddComment(req: Request, postId: string, user: any): Promis
     author: authorName(user),
     body: body.trim(),
   });
+
   if (error) throw error;
   return Response.json({ ok: true });
 }
 
-async function handleList(): Promise<Response> {
-  const { data, error } = await supabase
+async function handleList(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const statusParam = url.searchParams.get('status');
+
+  let query = supabase
     .from('posts')
     .select('id, caption, author, created_at, status, location, post_media(id, object_key, mime_type, sort_order)')
     .order('created_at', { ascending: false })
     .limit(50);
+
+  if (statusParam === 'trash') {
+    query = query.eq('status', 'trash');
+  } else {
+    query = query.neq('status', 'trash');
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
 
   const rows = (data ?? []).map((post) => ({
@@ -198,7 +278,6 @@ async function handleList(): Promise<Response> {
       ...m,
       url: `https://wmouyojmcelxgkwjfpxz.supabase.co/storage/v1/object/public/moments/${m.object_key}`,
     })),
-  }));
   return Response.json(rows);
 }
 

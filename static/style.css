@@ -48,6 +48,8 @@ img, video { display: block; }
   color: var(--muted); transition: background .15s, color .15s;
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.icon-btn.active { color: var(--accent); }
+.icon-btn.active:hover { background: var(--surface-2); color: var(--accent); }
 .icon-btn:disabled { opacity: .5; pointer-events: none; }
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

@@ -64,12 +64,21 @@
       const gps = await exifr.gps(img.blob);
       if (gps?.latitude != null && gps?.longitude != null) {
         locationNote = `${gps.latitude.toFixed(5)}, ${gps.longitude.toFixed(5)}`;
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${gps.latitude}&lon=${gps.longitude}`,
-          { headers: { Accept: 'application/json' } },
-        );
-        const data = await res.json().catch(() => null);
-        location = data?.display_name || locationNote;
+        location = locationNote;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${gps.latitude}&lon=${gps.longitude}`,
+            { headers: { Accept: 'application/json' } }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.display_name) {
+              location = data.display_name;
+            }
+          }
+        } catch (e) {
+          console.warn('Reverse geocode failed', e);
+        }
       } else {
         locationNote = 'No location found in photo.';
       }
