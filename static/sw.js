@@ -1,4 +1,4 @@
-const CACHE = 'moments-shell-v6'; // bump to invalidate every phone's cached shell
+const CACHE = 'moments-shell-v7'; // bump to invalidate every phone's cached shell
 const MEDIA_CACHE = 'moments-media';
 const SHELL = ['/', '/manifest.json', '/style.css'];
 
