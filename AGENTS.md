@@ -19,7 +19,8 @@ test**.
   - `src/lib/session.svelte.js` — shared auth state (Svelte 5 runes).
   - `src/lib/api.js` — fetch wrappers for the edge function + date helpers.
   - `src/lib/share.js` — IndexedDB reader for deferred shares + upload helper.
-  - `src/lib/PostViewer.svelte`, `src/lib/actions.js` — viewer + Svelte actions.
+  - `src/lib/PostViewer.svelte` — fullscreen post viewer (native `<dialog>`;
+    options menu is an HTML popover).
 - **`static/`** — copied verbatim into the build: `manifest.json`,
   `style.css`, `icons/`, `sw.js`, and **`_worker.js`** (Cloudflare Pages
   request handler; see below).
@@ -64,7 +65,7 @@ test**.
 1. Create a new file `supabase/migrations/00NN_short_name.sql`. **Number must
    be the next sequential integer — never reuse one.** A duplicate number
    makes `supabase db push` fail with a migration-version conflict. Current
-   max is `0006`.
+   max is `0008`.
 2. Use idempotent DDL where it fits: `create table if not exists`,
    `add column if not exists`.
 3. RLS: enable it on new tables and add read policies for `authenticated`

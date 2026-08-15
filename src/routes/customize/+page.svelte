@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { loadShare, dropShare, uploadShare, type PendingShare } from '$lib/share';
+  import { fetchPeople } from '$lib/api';
   import { initSession } from '$lib/session.svelte';
   import exifr from 'exifr';
 
@@ -20,6 +21,11 @@
   let posting = $state(false);
   let error = $state('');
   let objectUrls: string[] = [];
+  let activeIndex = $state(0);
+  let detected = $state(false);
+  let mentioned = $state(false);
+  let otherName = $state<string | null>(null);
+  let carouselEl = $state<HTMLDivElement | undefined>();
 
   function toLocalDatetimeString(date: Date): string {
     const pad = (num: number) => String(num).padStart(2, '0');
@@ -50,6 +56,10 @@
       detectMetadata();
       cleanup = () => objectUrls.forEach((u) => URL.revokeObjectURL(u));
     })();
+    // Who can be @mentioned: the other half of the journal.
+    fetchPeople()
+      .then((p) => (otherName = p.other))
+      .catch(() => {});
     return () => {
       if (cleanup) cleanup();
     };
@@ -69,6 +79,7 @@
         lng = gps.longitude;
         locationNote = `${gps.latitude.toFixed(5)}, ${gps.longitude.toFixed(5)}`;
         location = locationNote;
+        detected = true;
         try {
           const res = await fetch(
             `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${gps.latitude}&lon=${gps.longitude}`,
@@ -126,15 +137,57 @@
     if (!location) {
       detectMetadata();
     }
+    // Keep the moved slide in focus.
+    goTo(targetIndex);
   }
 
-  async function post() {
+  function goTo(i: number) {
+    const el = carouselEl;
+    if (!el) return;
+    const slides = el.querySelectorAll('.cap-slide');
+    const slide = slides[i] as HTMLElement | undefined;
+    if (!slide) return;
+    const target = slide.offsetLeft - (el.clientWidth - slide.offsetWidth) / 2;
+    el.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+  }
+
+  // Which slide is centered is driven by the carousel's own scroll position.
+  function onScroll() {
+    const el = carouselEl;
+    if (!el) return;
+    const slides = el.querySelectorAll('.cap-slide');
+    const cx = el.scrollLeft + el.clientWidth / 2;
+    let best = 0;
+    let bestDist = Infinity;
+    slides.forEach((s, i) => {
+      const slide = s as HTMLElement;
+      const center = slide.offsetLeft + slide.offsetWidth / 2;
+      const dist = Math.abs(center - cx);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    });
+    activeIndex = best;
+  }
+
+  function clearLocation() {
+    location = '';
+    lat = null;
+    lng = null;
+    detected = false;
+    locationNote = '';
+  }
+
+  async function post(e: SubmitEvent) {
+    e.preventDefault();
     if (posting || !share || !id) return;
     posting = true;
     error = '';
     try {
       const isoDate = new Date(postDate).toISOString();
-      await uploadShare(share, caption.trim(), location.trim(), isoDate, lat, lng);
+      const mentions = mentioned && otherName ? [otherName] : [];
+      await uploadShare(share, caption.trim(), location.trim(), isoDate, lat, lng, mentions);
       await dropShare(id);
       goto('/');
     } catch {
@@ -167,79 +220,115 @@
       </div>
     {:else if !share}
       <h1 class="logo">Moments</h1>
-      <p class="msg">Loading…</p>
+      <div class="skel-cap" role="status" aria-label="Loading share">
+        <div class="skel-line" style="width: 45%; height: 20px;"></div>
+        <div class="skel-media" style="height: 170px;"></div>
+        <div class="skel-line" style="width: 92%;"></div>
+        <div class="skel-line" style="width: 68%;"></div>
+        <div class="skel-btn"></div>
+      </div>
     {:else}
       <h1 class="logo">Moments</h1>
       <p class="msg">{previews.length} item{previews.length > 1 ? 's' : ''} ready to post</p>
 
-      <div class="cap-previews">
-        {#each previews as p, i (p.url)}
-          <div class="preview-item">
-            {#if p.isVideo}
-              <!-- svelte-ignore a11y_media_has_caption -->
-              <video src={p.url} controls playsinline></video>
-            {:else}
-              <img src={p.url} alt="Preview {i + 1}" />
-            {/if}
-            <div class="preview-controls">
-              <button
-                type="button"
-                class="btn-control"
-                disabled={i === 0}
-                onclick={() => moveItem(i, -1)}
-                title="Move Up"
-              >
-                ▲
-              </button>
-              <button
-                type="button"
-                class="btn-control"
-                disabled={i === previews.length - 1}
-                onclick={() => moveItem(i, 1)}
-                title="Move Down"
-              >
-                ▼
-              </button>
+      <form onsubmit={post}>
+        <div class="cap-carousel" bind:this={carouselEl} onscroll={onScroll}>
+          {#each previews as p, i (p.url)}
+            <div class="cap-slide">
+              {#if p.isVideo}
+                <!-- svelte-ignore a11y_media_has_caption -->
+                <video src={p.url} controls playsinline></video>
+              {:else}
+                <img src={p.url} alt="Preview {i + 1}" />
+              {/if}
+              {#if previews.length > 1}
+                <div class="cap-reorder">
+                  <button type="button" class="btn-control" disabled={i === 0} onclick={() => moveItem(i, -1)} title="Move left" aria-label="Move left">‹</button>
+                  <button type="button" class="btn-control" disabled={i === previews.length - 1} onclick={() => moveItem(i, 1)} title="Move right" aria-label="Move right">›</button>
+                </div>
+              {/if}
             </div>
+          {/each}
+        </div>
+        {#if previews.length > 1}
+          <div class="dots cap-dots">
+            {#each previews as p, i (p.url)}
+              <button class:active={i === activeIndex} aria-label="Go to item {i + 1}" onclick={() => goTo(i)}></button>
+            {/each}
           </div>
-        {/each}
-      </div>
+        {/if}
 
-      <textarea class="input" bind:value={caption} rows={3} placeholder="Write a caption…"></textarea>
+        <label class="cap-label" for="caption">Caption</label>
+        <textarea class="input" id="caption" bind:value={caption} rows={3} placeholder="Write a caption…" autocomplete="off"></textarea>
 
-      <label class="cap-label" for="date">Date & Time</label>
-      <input class="input" id="date" type="datetime-local" bind:value={postDate} />
+        <label class="cap-label" for="date">Date & Time</label>
+        <input class="input" id="date" type="datetime-local" bind:value={postDate} required />
 
-      <label class="cap-label" for="loc">
-        Location
-        {#if detecting}<span class="cap-hint">detecting…</span>{/if}
-        {#if locationNote}<span class="cap-hint">{locationNote}</span>{/if}
-      </label>
-      <input class="input" id="loc" bind:value={location} oninput={() => { lat = null; lng = null; }} placeholder="Add a place…" />
+        <label class="cap-label" for="loc">
+          Location
+          {#if detected}<span class="cap-badge">from photo</span>{/if}
+          {#if detecting}<span class="cap-hint">detecting…</span>{/if}
+          {#if locationNote}<span class="cap-hint">{locationNote}</span>{/if}
+        </label>
+        <div class="loc-input">
+          <svg class="loc-pin" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5a5 5 0 0 1 5 5c0 3.5-5 8-5 8s-5-4.5-5-8a5 5 0 0 1 5-5z"/><circle cx="8" cy="6.5" r="1.8"/></svg>
+          <input class="input" id="loc" bind:value={location} oninput={() => { lat = null; lng = null; detected = false; }} placeholder="Add a place…" autocomplete="off" enterkeyhint="done" />
+          {#if location}
+            <button type="button" class="loc-clear" onclick={clearLocation} aria-label="Clear location">✕</button>
+          {/if}
+        </div>
 
-      {#if error}<p class="auth-error">{error}</p>{/if}
+        {#if otherName}
+          <label class="cap-label" for="mention-chip">Mention someone</label>
+          <button type="button" id="mention-chip" class="chip" class:on={mentioned} onclick={() => (mentioned = !mentioned)}>
+            @{otherName}
+          </button>
+        {/if}
 
-      <div class="cap-actions">
-        <button class="btn btn-primary" onclick={post} disabled={posting}>
-          {posting ? 'Posting…' : 'Post'}
-        </button>
-      </div>
+        {#if error}<p class="auth-error">{error}</p>{/if}
+
+        <div class="cap-actions">
+          <button class="btn btn-primary" type="submit" disabled={posting}>
+            {posting ? 'Posting…' : 'Post'}
+          </button>
+        </div>
+      </form>
     {/if}
   </div>
 </main>
 
 <style>
-  .preview-item {
+  .cap-carousel {
     position: relative;
     display: flex;
-    flex-direction: column;
+    gap: 10px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    padding: 4px 10px 10px;
+    margin: 0 -10px;
+  }
+  .cap-carousel::-webkit-scrollbar { display: none; }
+  .cap-slide {
+    position: relative;
+    flex: 0 0 78%;
+    scroll-snap-align: center;
+    aspect-ratio: 4 / 3;
     border-radius: var(--radius-sm);
     overflow: hidden;
+    background: #000;
   }
-  .preview-controls {
+  .cap-slide img,
+  .cap-slide video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .cap-reorder {
     position: absolute;
-    top: 8px;
-    right: 8px;
+    bottom: 8px;
+    left: 50%;
+    translate: -50% 0;
     display: flex;
     gap: 4px;
     background: rgba(0, 0, 0, 0.6);
@@ -252,8 +341,8 @@
     background: transparent;
     border: none;
     color: #fff;
-    font-size: 0.75rem;
-    width: 28px;
+    font-size: 1.05rem;
+    width: 32px;
     height: 28px;
     display: flex;
     align-items: center;
@@ -268,5 +357,8 @@
   .btn-control:disabled {
     opacity: 0.3;
     cursor: not-allowed;
+  }
+  .cap-dots {
+    margin: 4px 0 12px;
   }
 </style>

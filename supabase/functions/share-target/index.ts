@@ -54,6 +54,14 @@ Deno.serve(async (req) => {
       return handleAddComment(req, commentsMatch[1], user);
     }
 
+    if (req.method === 'GET' && url.pathname.endsWith('/share-target/people')) {
+      const people = await projectPeople(user);
+      return Response.json({
+        me: authorName(user),
+        other: people.find((n) => n !== authorName(user)) ?? null,
+      });
+    }
+
     if (req.method === 'GET' && url.pathname.endsWith('/share-target/posts')) {
       return handleList(req);
     }
@@ -96,6 +104,22 @@ function authorName(user: any) {
   );
 }
 
+// Display names of every signed-up user in this project. Used to resolve
+// @mentions server-side so clients can't invent people. The service role can
+// list auth users; if that's disabled, we fall back to just the caller.
+async function projectPeople(user: any): Promise<string[]> {
+  const names: string[] = [];
+  try {
+    const { data } = await supabase.auth.admin.listUsers();
+    for (const u of data?.users ?? []) names.push(authorName(u));
+  } catch (e) {
+    console.error('listUsers failed:', e);
+  }
+  const me = authorName(user);
+  if (!names.includes(me)) names.push(me);
+  return names;
+}
+
 // Form values arrive as strings; null stays null.
 function parseCoord(v: FormDataEntryValue | null): number | null {
   if (v == null || v === '') return null;
@@ -136,6 +160,10 @@ async function handleShare(req: Request, user: any): Promise<Response> {
   const postId = crypto.randomUUID();
   const createdAt = createdAtForm || new Date().toISOString();
 
+  // Accept only mentions that match a real signed-up user.
+  const requested = (form.getAll('mentions') as string[]).map((m) => m.trim()).filter(Boolean);
+  const mentions = (await projectPeople(user)).filter((n) => requested.includes(n));
+
   const { error: postErr } = await supabase.from('posts').insert({
     id: postId,
     caption: text,
@@ -145,6 +173,7 @@ async function handleShare(req: Request, user: any): Promise<Response> {
     location,
     lat,
     lng,
+    mentions,
   });
   if (postErr) throw postErr;
 
@@ -280,7 +309,7 @@ async function handleList(req: Request): Promise<Response> {
 
   let query = supabase
     .from('posts')
-    .select('id, caption, author, created_at, status, location, lat, lng, post_media(id, object_key, mime_type, sort_order)')
+    .select('id, caption, author, created_at, status, location, lat, lng, mentions, post_media(id, object_key, mime_type, sort_order)')
     .order('created_at', { ascending: false })
     .limit(50);
 

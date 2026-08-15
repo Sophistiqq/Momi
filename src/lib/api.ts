@@ -18,6 +18,7 @@ export interface Post {
   location?: string | null;
   lat?: number | null;
   lng?: number | null;
+  mentions?: string[];
   post_media: Media[];
 }
 
@@ -32,6 +33,18 @@ export interface Comment {
 export async function fetchPosts(status?: string): Promise<Post[]> {
   const url = status ? `/share-target/posts?status=${status}` : '/share-target/posts';
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(String(res.status));
+  return res.json();
+}
+
+export interface People {
+  me: string;
+  other: string | null;
+}
+
+// The two people in this journal, for @mentions on the customize page.
+export async function fetchPeople(): Promise<People> {
+  const res = await fetch('/share-target/people', { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(String(res.status));
   return res.json();
 }

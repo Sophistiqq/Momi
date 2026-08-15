@@ -52,14 +52,16 @@ export interface UploadResult {
   postId: string;
 }
 
-// Upload the pending share with caption + location to the edge function.
+// Upload the pending share with caption, location, and mentions to the edge
+// function. Mentions are display names; the server re-validates them.
 export async function uploadShare(
   share: PendingShare,
   caption: string,
   location: string,
   createdAt?: string,
   lat?: number | null,
-  lng?: number | null
+  lng?: number | null,
+  mentions: string[] = []
 ): Promise<UploadResult> {
   const form = new FormData();
   form.append('text', caption);
@@ -67,6 +69,7 @@ export async function uploadShare(
   if (createdAt) form.append('created_at', createdAt);
   if (lat != null) form.append('lat', String(lat));
   if (lng != null) form.append('lng', String(lng));
+  for (const name of mentions) form.append('mentions', name);
   for (const f of share.files) {
     form.append('photos', f.blob, f.name);
   }

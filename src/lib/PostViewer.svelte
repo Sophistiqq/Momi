@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { fetchComments, addComment, updatePost, deletePost, formatDate, formatDateTime, type Comment, type Post } from '$lib/api';
-  import { clickOutside } from '$lib/actions';
 
   let { post, onClose, onDelete, onRestore }: { post: Post; onClose: () => void; onDelete?: (id: string) => void; onRestore?: (id: string) => void } = $props();
 
@@ -18,8 +16,15 @@
   let editingPost = $state(false);
   let captionDraft = $state('');
   let locationDraft = $state('');
-  let showMenu = $state(false);
   let mediaCell: HTMLDivElement | undefined;
+  let viewerEl: HTMLDialogElement | undefined;
+  let deleteDialog: HTMLDialogElement | undefined;
+
+  let confirmMsg = $derived(
+    post.status === 'trash'
+      ? 'Permanently delete this post? This cannot be undone.'
+      : 'Move this post to Trash?'
+  );
 
   $effect(() => {
     // Reset state whenever a (new) post opens.
@@ -30,7 +35,6 @@
     pinch = { active: false, dist: 0, scale: 1 };
     comments = [];
     editingPost = false;
-    showMenu = false;
     loadingComments = true;
     fetchComments(post.id)
       .then((c) => (comments = c))
@@ -38,20 +42,21 @@
       .finally(() => (loadingComments = false));
   });
 
-  onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+  $effect(() => {
+    // Open the native dialog whenever the viewer mounts.
+    if (viewerEl && !viewerEl.open) viewerEl.showModal();
   });
 
-  function swipe(dx: number): void {
+  function goTo(i: number): void {
     const n = post.post_media.length;
-    if (Math.abs(dx) < 40) return;
+    mediaIndex = Math.max(0, Math.min(n - 1, i));
     zoom = 1;
-    mediaIndex = dx < 0 ? Math.min(n - 1, mediaIndex + 1) : Math.max(0, mediaIndex - 1);
     clearZoom();
+  }
+
+  function swipe(dx: number): void {
+    if (Math.abs(dx) < 40) return;
+    goTo(mediaIndex + (dx < 0 ? 1 : -1));
   }
 
   function onTouchStart(e: TouchEvent): void {
@@ -152,9 +157,11 @@
     editingPost = false;
   }
 
+  function askDelete(): void {
+    deleteDialog?.showModal();
+  }
+
   async function handleDelete(): Promise<void> {
-    const isTrash = post.status === 'trash';
-    if (!confirm(isTrash ? 'Permanently delete this post? This cannot be undone.' : 'Move this post to Trash?')) return;
     const ok = await deletePost(post.id);
     if (ok) {
       if (onDelete) onDelete(post.id);
@@ -190,10 +197,7 @@
   }
 </script>
 
-<div class="viewer open">
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="viewer-backdrop" onclick={onClose}></div>
-
+<dialog class="viewer" bind:this={viewerEl} onclose={() => onClose()}>
   <div class="viewer-panel">
     <div class="info-head">
       <div class="info-head-text">
@@ -203,21 +207,17 @@
         {/if}
       </div>
       <div class="info-actions">
-        <div class="menu" use:clickOutside={() => (showMenu = false)}>
-          <button class="icon-btn" onclick={() => (showMenu = !showMenu)} aria-label="Options">⋯</button>
-          {#if showMenu}
-            <div class="menu-list">
-              <button onclick={() => { startEditPost(); showMenu = false; }}>Edit post</button>
-              {#if post.status === 'trash'}
-                <button onclick={() => { handleRestore(); showMenu = false; }} style="color: var(--primary);">Restore post</button>
-                <button onclick={() => { handleDelete(); showMenu = false; }} style="color: #ff5e5e;">Delete permanently</button>
-              {:else}
-                <button onclick={() => { handleDelete(); showMenu = false; }} style="color: #ff5e5e;">Move to Trash</button>
-              {/if}
-            </div>
+        <button class="icon-btn menu-btn" popovertarget="post-menu" aria-label="Options">⋯</button>
+        <div class="menu-list" id="post-menu" popover>
+          <button popovertarget="post-menu" popovertargetaction="hide" onclick={startEditPost}>Edit post</button>
+          {#if post.status === 'trash'}
+            <button popovertarget="post-menu" popovertargetaction="hide" onclick={handleRestore} style="color: var(--accent);">Restore post</button>
+            <button popovertarget="post-menu" popovertargetaction="hide" onclick={askDelete} style="color: var(--danger);">Delete permanently</button>
+          {:else}
+            <button popovertarget="post-menu" popovertargetaction="hide" onclick={askDelete} style="color: var(--danger);">Move to Trash</button>
           {/if}
         </div>
-        <button class="icon-btn close-btn" onclick={onClose} aria-label="Close">✕</button>
+        <button class="icon-btn close-btn" onclick={() => onClose()} aria-label="Close">✕</button>
       </div>
     </div>
 
@@ -246,9 +246,29 @@
           {/each}
         </div>
         {#if post.post_media.length > 1}
+          <div class="media-nav">
+            <button
+              type="button"
+              class="btn-nav prev"
+              disabled={mediaIndex === 0}
+              aria-label="Previous media"
+              onclick={(e) => { e.stopPropagation(); goTo(mediaIndex - 1); }}
+            >
+              <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5L4 8l6 5.5"/></svg>
+            </button>
+            <button
+              type="button"
+              class="btn-nav next"
+              disabled={mediaIndex === post.post_media.length - 1}
+              aria-label="Next media"
+              onclick={(e) => { e.stopPropagation(); goTo(mediaIndex + 1); }}
+            >
+              <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5L12 8l-6 5.5"/></svg>
+            </button>
+          </div>
           <div class="dots">
             {#each post.post_media as m, i (m.id)}
-              <button class:active={i === mediaIndex} aria-label={`Media ${i + 1}`} onclick={(e) => { e.stopPropagation(); mediaIndex = i; }}></button>
+              <button class:active={i === mediaIndex} aria-label={`Media ${i + 1}`} onclick={(e) => { e.stopPropagation(); goTo(i); }}></button>
             {/each}
           </div>
         {/if}
@@ -259,6 +279,9 @@
           {#if !editingPost}
             <div class="post-caption">
               <p class:muted={!post.caption}>{post.caption || 'No caption yet'}</p>
+              {#if post.mentions?.length}
+                <p class="post-mentions">{post.mentions.map((n) => `@${n}`).join(' ')}</p>
+              {/if}
               <time>{formatDateTime(post.created_at)}</time>
             </div>
           {:else}
@@ -274,14 +297,19 @@
 
           <p class="comments-title">Comments</p>
           {#if loadingComments}
-            <div class="comments-loading">
-              <div class="spinner" style="width:20px;height:20px;border-width:2px"></div>
+            <div class="skel-comments" role="status" aria-label="Loading comments">
+              {#each [0, 1, 2] as n (n)}
+                <div class="skel-comment">
+                  <div class="skel-line" style="width: 30%;"></div>
+                  <div class="skel-line" style="width: 85%;"></div>
+                </div>
+              {/each}
             </div>
           {:else if !comments.length}
             <p class="comments-empty">Be the first to comment.</p>
           {/if}
-          {#each comments as c (c.id)}
-            <div class="comment">
+          {#each comments as c, i (c.id)}
+            <div class="comment" style="animation-delay: {Math.min(i, 6) * 25}ms">
               <p class="c-author">{c.author || 'Anonymous'}</p>
               <p class="c-body">{c.body}</p>
               <span class="meta">{formatDate(c.created_at)}</span>
@@ -300,5 +328,14 @@
       </div>
     </div>
   </div>
-</div>
+</dialog>
 
+<dialog class="confirm-dialog" bind:this={deleteDialog}>
+  <form method="dialog">
+    <p class="confirm-msg">{confirmMsg}</p>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost" value="cancel">Cancel</button>
+      <button class="btn btn-danger" value="ok" onclick={handleDelete}>Delete</button>
+    </div>
+  </form>
+</dialog>
