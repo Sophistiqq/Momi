@@ -103,7 +103,17 @@ textarea.input { resize: vertical; line-height: 1.5; }
 }
 .timeline .timeline-card { animation: rise-in .35s cubic-bezier(.2, .7, .3, 1) both; }
 .comment { animation: rise-in .3s ease both; }
-.state { transition: opacity .2s, display .2s allow-discrete; }
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+  padding: 24px;
+  min-height: 60vh;
+  transition: opacity .2s, display .2s allow-discrete;
+}
 .state.show { @starting-style { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -325,9 +335,21 @@ main {
 .skel-cap { display: flex; flex-direction: column; gap: 14px; text-align: left; }
 .skel-comments { display: flex; flex-direction: column; gap: 16px; padding: 4px 0; }
 .skel-comment { display: flex; flex-direction: column; gap: 6px; }
+.skel-hud {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 18px;
+  background: rgba(14, 14, 18, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+}
 
 /* ---- Sign-in ---- */
-.state.login { gap: 14px; padding-top: 20vh; }
+.state.login { gap: 16px; }
 .state.login .logo { font-size: 1.6rem; }
 .btn-google {
   display: inline-flex; align-items: center; gap: 10px;

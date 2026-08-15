@@ -10,7 +10,7 @@
     onSelectPost: (post: Post) => void;
   }
 
-  let { posts, activePostId, showConnectors = true, onSelectPost }: Props = $props();
+  let { posts, activePostId, showConnectors = false, onSelectPost }: Props = $props();
 
   const darkStyle: maplibregl.StyleSpecification = {
     version: 8,

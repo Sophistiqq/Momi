@@ -12,7 +12,7 @@
   let activePost = $state<Post | null>(null);
   let focusedPostId = $state<string | null>(null);
   let showTrash = $state(false);
-  let showConnectors = $state(true);
+  let showConnectors = $state(false);
 
   let countText = $derived(
     posts.length
@@ -252,13 +252,25 @@
 
   <main>
     {#if loading}
-      <div class="timeline" role="status" aria-label="Loading moments">
-        {#each [0, 1, 2, 3, 4] as n (n)}
-          <div class="skel-post-card">
-            <div class="skel-line" style="width: 50%; height: 16px;"></div>
-            <div class="skel-line" style="width: 30%; height: 12px; margin-top: 6px;"></div>
-          </div>
-        {/each}
+      <div class="snap-feed-wrapper" role="status" aria-label="Loading moments">
+        <div class="snap-feed" style="overflow-x: hidden;">
+          {#each [0, 1, 2] as n (n)}
+            <div class="snap-slide">
+              <div class="skel-hud">
+                <div class="hud-top">
+                  <div class="skel-line" style="width: 70px; height: 16px; border-radius: 12px;"></div>
+                  <div class="skel-line" style="width: 50px; height: 14px;"></div>
+                </div>
+                <div class="skel-line" style="width: 85%; height: 14px; margin-top: 4px;"></div>
+                <div class="skel-line" style="width: 60%; height: 14px;"></div>
+                <div class="hud-bottom" style="margin-top: 6px;">
+                  <div class="skel-line" style="width: 80px; height: 12px;"></div>
+                  <div class="skel-line" style="width: 24px; height: 24px; border-radius: 50%;"></div>
+                </div>
+              </div>
+            </div>
+          {/each}
+        </div>
       </div>
     {:else if error}
       <div class="state show">
