@@ -228,9 +228,6 @@
         <div class="skel-btn"></div>
       </div>
     {:else}
-      <h1 class="logo">Moments</h1>
-      <p class="msg">{previews.length} item{previews.length > 1 ? 's' : ''} ready to post</p>
-
       <form onsubmit={post}>
         <div class="cap-carousel" bind:this={carouselEl} onscroll={onScroll}>
           {#each previews as p, i (p.url)}
@@ -305,8 +302,7 @@
     overflow-x: auto;
     scroll-snap-type: x mandatory;
     scrollbar-width: none;
-    padding: 4px 10px 10px;
-    margin: 0 -10px;
+    padding: 2px 0 10px;
   }
   .cap-carousel::-webkit-scrollbar { display: none; }
   .cap-slide {
