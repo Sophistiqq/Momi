@@ -248,6 +248,30 @@
         <button
           popovertarget="app-menu"
           popovertargetaction="hide"
+          onclick={() => load()}
+        >
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+            ><path d="M2 8a6 6 0 1 0 1.5-3.9M2 3.5V8h4.5" /></svg
+          >
+          Fetch
+        </button>
+        <button
+          popovertarget="app-menu"
+          popovertargetaction="hide"
+          onclick={async () => {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+            location.reload();
+          }}
+        >
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+            ><path d="M8 2v3l3-3M2 8a6 6 0 0 0 10.3 4.2M14 8a6 6 0 0 0-10.3-4.2" /></svg
+          >
+          Update
+        </button>
+        <button
+          popovertarget="app-menu"
+          popovertargetaction="hide"
           onclick={openTrash}
         >
           <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
