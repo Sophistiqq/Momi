@@ -207,7 +207,9 @@
         {/if}
       </div>
       <div class="info-actions">
-        <button class="icon-btn menu-btn" popovertarget="post-menu" aria-label="Options">⋯</button>
+        <button class="icon-btn menu-btn" popovertarget="post-menu" aria-label="Options">
+          <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><circle cx="3" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="13" cy="8" r="1.6"/></svg>
+        </button>
         <div class="menu-list" id="post-menu" popover>
           <button popovertarget="post-menu" popovertargetaction="hide" onclick={startEditPost}>Edit post</button>
           {#if post.status === 'trash'}
@@ -217,7 +219,9 @@
             <button popovertarget="post-menu" popovertargetaction="hide" onclick={askDelete} style="color: var(--danger);">Move to Trash</button>
           {/if}
         </div>
-        <button class="icon-btn close-btn" onclick={() => onClose()} aria-label="Close">✕</button>
+        <button class="icon-btn close-btn" onclick={() => onClose()} aria-label="Close">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
       </div>
     </div>
 

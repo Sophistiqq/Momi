@@ -57,11 +57,17 @@ export async function signInWithGoogle(): Promise<void> {
   session.error = '';
   session.signingIn = true;
   try {
-    const { error } = await supabase.auth.signInWithOAuth({
+    // Full-page redirect, not a popup: mobile browsers (esp. iOS Safari)
+    // block popups, which silently broke Google sign-in on phones.
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: location.origin },
+      options: { redirectTo: location.origin, skipBrowserRedirect: true },
     });
-    if (error) session.error = error.message;
+    if (error) {
+      session.error = error.message;
+    } else if (data?.url) {
+      window.location.assign(data.url);
+    }
   } catch (e) {
     session.error = e instanceof Error ? e.message : 'Sign-in failed';
   } finally {

@@ -271,7 +271,9 @@
           <svg class="loc-pin" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5a5 5 0 0 1 5 5c0 3.5-5 8-5 8s-5-4.5-5-8a5 5 0 0 1 5-5z"/><circle cx="8" cy="6.5" r="1.8"/></svg>
           <input class="input" id="loc" bind:value={location} oninput={() => { lat = null; lng = null; detected = false; }} placeholder="Add a place…" autocomplete="off" enterkeyhint="done" />
           {#if location}
-            <button type="button" class="loc-clear" onclick={clearLocation} aria-label="Clear location">✕</button>
+            <button type="button" class="loc-clear" onclick={clearLocation} aria-label="Clear location">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+            </button>
           {/if}
         </div>
 

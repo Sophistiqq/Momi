@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { sendNotification } from 'npm:web-push-neo@0.1.2';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -55,11 +56,24 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === 'GET' && url.pathname.endsWith('/share-target/people')) {
-      const people = await projectPeople(user);
+      const people = await allUsers(user);
       return Response.json({
         me: authorName(user),
-        other: people.find((n) => n !== authorName(user)) ?? null,
+        other: people.find((p) => p.id !== user.id)?.name ?? null,
       });
+    }
+
+    // Web push: fetch the public VAPID key, store/remove a device subscription.
+    if (req.method === 'GET' && url.pathname.endsWith('/share-target/push/public-key')) {
+      const publicKey = Deno.env.get('VAPID_PUBLIC_KEY');
+      if (!publicKey) return Response.json({ error: 'push not configured' }, { status: 503 });
+      return Response.json({ publicKey });
+    }
+    if (req.method === 'POST' && url.pathname.endsWith('/share-target/push/subscribe')) {
+      return handlePushSubscribe(req, user);
+    }
+    if (req.method === 'DELETE' && url.pathname.endsWith('/share-target/push/subscribe')) {
+      return handlePushUnsubscribe(req, user);
     }
 
     if (req.method === 'GET' && url.pathname.endsWith('/share-target/posts')) {
@@ -104,20 +118,20 @@ function authorName(user: any) {
   );
 }
 
-// Display names of every signed-up user in this project. Used to resolve
-// @mentions server-side so clients can't invent people. The service role can
-// list auth users; if that's disabled, we fall back to just the caller.
-async function projectPeople(user: any): Promise<string[]> {
-  const names: string[] = [];
+// Every signed-up user in this project, id + display name. Used to resolve
+// @mentions and to find "the other person" for push notifications. The
+// service role can list auth users; if that's disabled, we fall back to
+// just the caller.
+async function allUsers(user: any): Promise<{ id: string; name: string }[]> {
+  const users: { id: string; name: string }[] = [];
   try {
     const { data } = await supabase.auth.admin.listUsers();
-    for (const u of data?.users ?? []) names.push(authorName(u));
+    for (const u of data?.users ?? []) users.push({ id: u.id, name: authorName(u) });
   } catch (e) {
     console.error('listUsers failed:', e);
   }
-  const me = authorName(user);
-  if (!names.includes(me)) names.push(me);
-  return names;
+  if (!users.some((u) => u.id === user.id)) users.push({ id: user.id, name: authorName(user) });
+  return users;
 }
 
 // Form values arrive as strings; null stays null.
@@ -160,9 +174,11 @@ async function handleShare(req: Request, user: any): Promise<Response> {
   const postId = crypto.randomUUID();
   const createdAt = createdAtForm || new Date().toISOString();
 
-  // Accept only mentions that match a real signed-up user.
+  // Resolve mentions against real signed-up users (and grab the partner's id
+  // for the push notification in one auth listing).
+  const people = await allUsers(user);
   const requested = (form.getAll('mentions') as string[]).map((m) => m.trim()).filter(Boolean);
-  const mentions = (await projectPeople(user)).filter((n) => requested.includes(n));
+  const mentions = people.map((p) => p.name).filter((n) => requested.includes(n));
 
   const { error: postErr } = await supabase.from('posts').insert({
     id: postId,
@@ -196,6 +212,18 @@ async function handleShare(req: Request, user: any): Promise<Response> {
       sort_order: order++,
     });
     if (mediaErr) throw mediaErr;
+  }
+
+  // Notify the other half that a post landed (or that they were tagged).
+  const partner = people.find((p) => p.id !== user.id);
+  if (partner) {
+    const mentioned = mentions.includes(partner.name);
+    await sendPushToUser(
+      partner.id,
+      mentioned ? `${authorName(user)} mentioned you` : `${authorName(user)} posted something new`,
+      text.trim().slice(0, 80) || 'Open Moments to see it.',
+      '/'
+    );
   }
 
   // The PWA's caption page uploads in the background via XHR and wants JSON
@@ -301,6 +329,67 @@ async function handleAddComment(req: Request, postId: string, user: any): Promis
 
   if (error) throw error;
   return Response.json({ ok: true });
+}
+
+async function handlePushSubscribe(req: Request, user: any): Promise<Response> {
+  const { endpoint, p256dh, auth } = await req.json();
+  if (!endpoint || !p256dh || !auth) {
+    return Response.json({ error: 'endpoint, p256dh, and auth are required' }, { status: 400 });
+  }
+  const { error } = await supabase
+    .from('push_subscriptions')
+    .upsert({ user_id: user.id, endpoint, p256dh, auth }, { onConflict: 'endpoint' });
+  if (error) throw error;
+  return Response.json({ ok: true });
+}
+
+async function handlePushUnsubscribe(req: Request, user: any): Promise<Response> {
+  const endpoint = new URL(req.url).searchParams.get('endpoint');
+  if (!endpoint) return Response.json({ error: 'endpoint required' }, { status: 400 });
+  const { error } = await supabase
+    .from('push_subscriptions')
+    .delete()
+    .eq('endpoint', endpoint)
+    .eq('user_id', user.id);
+  if (error) throw error;
+  return Response.json({ ok: true });
+}
+
+// Send a push notification to every device of the given user. Best-effort:
+// expired subscriptions (404/410) are dropped and failures are logged, but
+// nothing propagates to the caller. No-ops when VAPID secrets aren't set.
+async function sendPushToUser(userId: string, title: string, body: string, url = '/'): Promise<void> {
+  const subject = Deno.env.get('VAPID_SUBJECT');
+  const publicKey = Deno.env.get('VAPID_PUBLIC_KEY');
+  const privateKey = Deno.env.get('VAPID_PRIVATE_KEY');
+  if (!subject || !publicKey || !privateKey) return;
+
+  const { data: subs, error } = await supabase
+    .from('push_subscriptions')
+    .select('endpoint, p256dh, auth')
+    .eq('user_id', userId);
+  if (error || !subs?.length) return;
+
+  const payload = JSON.stringify({ title, body, url });
+  for (const sub of subs) {
+    try {
+      await sendNotification(
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+        payload,
+        {
+          vapidDetails: { subject, publicKey, privateKey },
+          TTL: 86400,
+          urgency: 'normal',
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+    } catch (e: any) {
+      if (e?.statusCode === 404 || e?.statusCode === 410) {
+        await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+      }
+      console.error('push failed:', e?.statusCode ?? e?.message ?? e);
+    }
+  }
 }
 
 async function handleList(req: Request): Promise<Response> {

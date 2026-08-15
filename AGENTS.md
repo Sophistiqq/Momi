@@ -65,7 +65,7 @@ test**.
 1. Create a new file `supabase/migrations/00NN_short_name.sql`. **Number must
    be the next sequential integer — never reuse one.** A duplicate number
    makes `supabase db push` fail with a migration-version conflict. Current
-   max is `0008`.
+   max is `0009`.
 2. Use idempotent DDL where it fits: `create table if not exists`,
    `add column if not exists`.
 3. RLS: enable it on new tables and add read policies for `authenticated`
@@ -122,6 +122,23 @@ test**.
 - Function secrets (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
   `SUPABASE_ANON_KEY`, `MOMENTS_BUCKET`) live on the function and persist
   across deploys; don't re-set them in CI.
+
+## Push notifications
+
+- Web push via `npm:web-push-neo` in the edge function (Web Crypto based;
+  the Node `web-push` package doesn't run on Deno). VAPID keys generated with
+  `npx web-push generate-vapid-keys` (raw 32-byte private is accepted).
+- Secrets to set once (`supabase secrets set ...`): `VAPID_PUBLIC_KEY`,
+  `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (a `mailto:` address).
+- Flow: feed page calls `initPushNotifications()` (src/lib/push.ts) →
+  fetches the public key from `GET /share-target/push/public-key` → asks
+  permission → `pushManager.subscribe` → stores the subscription via
+  `POST /share-target/push/subscribe`. Rows live in `push_subscriptions`
+  (keyed by `endpoint`). On upload, `handleShare` pushes to the partner's
+  devices ("posted something new" / "mentioned you").
+- `sw.js` handles `push` (shows the notification) and `notificationclick`
+  (opens `/`). Don't auto-reload on controllerchange; the SW update is
+  manual via the banner.
 
 ## Conventions
 

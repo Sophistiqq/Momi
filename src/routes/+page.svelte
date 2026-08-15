@@ -3,6 +3,7 @@
   import PostViewer from '$lib/PostViewer.svelte';
   import { fetchPosts, formatDate, type Media, type Post } from '$lib/api';
   import { session, initSession, signOut } from '$lib/session.svelte';
+  import { initPushNotifications } from '$lib/push';
 
   let posts = $state<Post[]>([]);
   let loading = $state(true);
@@ -27,6 +28,7 @@
     // otherwise the first request races a stale access token and 401s.
     await initSession();
     await load();
+    initPushNotifications();
   });
 
   function postMedia(post: Post): Media | null {
@@ -109,7 +111,9 @@
     <span class="logo logo-lg">{showTrash ? 'Trash' : 'Moments'}</span>
     <div class="topbar-right">
       {#if countText}<span class="count">{countText}</span>{/if}
-      <button class="icon-btn menu-btn" popovertarget="app-menu" aria-label="Menu">⋯</button>
+      <button class="icon-btn menu-btn" popovertarget="app-menu" aria-label="Menu">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><circle cx="3" cy="8" r="1.6"/><circle cx="8" cy="8" r="1.6"/><circle cx="13" cy="8" r="1.6"/></svg>
+      </button>
       <div class="app-menu" id="app-menu" popover>
         <button popovertarget="app-menu" popovertargetaction="hide" onclick={toggleTrash}>
           {#if showTrash}

@@ -240,9 +240,8 @@ main { max-width: 640px; margin: 0 auto; padding-bottom: 48px; }
 .info-loc { font-size: .75rem; color: var(--muted); margin-top: 1px; text-decoration: none; }
 .info-loc:active { opacity: .6; }
 .info-actions { display: flex; align-items: center; gap: 12px; }
-.close-btn { font-size: 1.15rem; font-weight: 300; opacity: 0.8; transition: opacity 0.2s; }
+.close-btn { opacity: 0.8; transition: opacity 0.2s; }
 .close-btn:hover { opacity: 1; }
-.menu-btn { font-size: 1.15rem; line-height: 1; }
 .menu-list, .app-menu {
   position: fixed;
   position-anchor: auto;
@@ -269,7 +268,11 @@ main { max-width: 640px; margin: 0 auto; padding-bottom: 48px; }
 .menu-list button:hover, .app-menu button:hover { background: var(--surface); }
 
 .confirm-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
   width: min(340px, 90vw);
+  height: fit-content;
   padding: 24px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -345,21 +348,22 @@ main { max-width: 640px; margin: 0 auto; padding-bottom: 48px; }
 .loc-pin {
   position: absolute;
   left: 12px;
-  inset-block: 0;
-  margin: auto 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
   color: var(--muted);
   pointer-events: none;
 }
 .loc-clear {
   position: absolute;
   right: 8px;
-  inset-block: 0;
-  margin: auto 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
   width: 28px;
   height: 28px;
   border: none; border-radius: 50%;
   background: transparent; color: var(--muted); cursor: pointer;
-  font-size: .8rem;
 }
 .loc-clear:hover { background: var(--surface-2); color: var(--text); }
 .chip {
