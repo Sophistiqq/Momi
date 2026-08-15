@@ -1,25 +1,32 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { goto } from '$app/navigation';
-  import { loadShare, dropShare, uploadShare, type PendingShare } from '$lib/share';
-  import { fetchPeople } from '$lib/api';
-  import { initSession } from '$lib/session.svelte';
-  import exifr from 'exifr';
+  import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
+  import {
+    loadShare,
+    dropShare,
+    uploadShare,
+    type PendingShare,
+  } from "$lib/share";
+  import { fetchPeople } from "$lib/api";
+  import { initSession } from "$lib/session.svelte";
+  import exifr from "exifr";
+  import * as maplibregl from "maplibre-gl";
+  import "maplibre-gl/dist/maplibre-gl.css";
 
-  const id = new URLSearchParams(window.location.search).get('id');
+  const id = new URLSearchParams(window.location.search).get("id");
 
   let share = $state<PendingShare | null>(null);
   let failed = $state(false);
   let previews = $state<{ url: string; isVideo: boolean }[]>([]);
   let postDate = $state(toLocalDatetimeString(new Date()));
-  let caption = $state('');
-  let location = $state('');
+  let caption = $state("");
+  let location = $state("");
   let lat = $state<number | null>(null);
   let lng = $state<number | null>(null);
-  let locationNote = $state('');
+  let locationNote = $state("");
   let detecting = $state(false);
   let posting = $state(false);
-  let error = $state('');
+  let error = $state("");
   let objectUrls: string[] = [];
   let activeIndex = $state(0);
   let detected = $state(false);
@@ -27,8 +34,107 @@
   let otherName = $state<string | null>(null);
   let carouselEl = $state<HTMLDivElement | undefined>();
 
+  // Map pin picker state
+  let showMapModal = $state(false);
+  let pickerMapContainer: HTMLDivElement | undefined = $state();
+  let pickerMap: maplibregl.Map | null = null;
+  let pickerMarker: maplibregl.Marker | null = null;
+  let pickerTempLat = $state<number>(0);
+  let pickerTempLng = $state<number>(0);
+
+  function openMapModal() {
+    pickerTempLat = lat ?? 14.5995;
+    pickerTempLng = lng ?? 120.9842;
+    showMapModal = true;
+  }
+
+  function closeMapModal() {
+    showMapModal = false;
+    pickerMarker?.remove();
+    pickerMarker = null;
+    pickerMap?.remove();
+    pickerMap = null;
+  }
+
+  async function confirmMapLocation() {
+    lat = pickerTempLat;
+    lng = pickerTempLng;
+    detected = true;
+    locationNote = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    closeMapModal();
+
+    // Reverse geocode to get a readable name for the pinned location
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${lat}&lon=${lng}`,
+        { headers: { Accept: "application/json" } },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.display_name) {
+          location = data.display_name;
+        }
+      }
+    } catch {}
+  }
+
+  $effect(() => {
+    if (showMapModal && pickerMapContainer && !pickerMap) {
+      const darkStyle: maplibregl.StyleSpecification = {
+        version: 8,
+        sources: {
+          "carto-dark": {
+            type: "raster",
+            tiles: [
+              "https://a.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png",
+              "https://b.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png",
+              "https://c.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png",
+              "https://d.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png",
+            ],
+            tileSize: 256,
+            attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+          },
+        },
+        layers: [
+          {
+            id: "carto-dark-layer",
+            type: "raster",
+            source: "carto-dark",
+            minzoom: 0,
+            maxzoom: 20,
+          },
+        ],
+      };
+
+      pickerMap = new maplibregl.Map({
+        container: pickerMapContainer,
+        style: darkStyle,
+        center: [pickerTempLng, pickerTempLat],
+        zoom: lat != null ? 14 : 4,
+      });
+
+      const el = document.createElement("div");
+      el.className = "picker-pin";
+      pickerMarker = new maplibregl.Marker({ element: el, draggable: true })
+        .setLngLat([pickerTempLng, pickerTempLat])
+        .addTo(pickerMap);
+
+      pickerMarker.on("dragend", () => {
+        const lngLat = pickerMarker!.getLngLat();
+        pickerTempLat = lngLat.lat;
+        pickerTempLng = lngLat.lng;
+      });
+
+      pickerMap.on("click", (e) => {
+        pickerTempLat = e.lngLat.lat;
+        pickerTempLng = e.lngLat.lng;
+        pickerMarker?.setLngLat(e.lngLat);
+      });
+    }
+  });
+
   function toLocalDatetimeString(date: Date): string {
-    const pad = (num: number) => String(num).padStart(2, '0');
+    const pad = (num: number) => String(num).padStart(2, "0");
     const YYYY = date.getFullYear();
     const MM = pad(date.getMonth() + 1);
     const DD = pad(date.getDate());
@@ -37,24 +143,43 @@
     return `${YYYY}-${MM}-${DD}T${hh}:${mm}`;
   }
 
+  function parseDateValue(val: any): Date | null {
+    if (!val) return null;
+    if (val instanceof Date && !isNaN(val.getTime())) return val;
+    if (typeof val === "string") {
+      const formatted = val.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
+      const d = new Date(formatted);
+      if (!isNaN(d.getTime())) return d;
+    }
+    if (typeof val === "number" && val > 0) {
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) return d;
+    }
+    return null;
+  }
+
   onMount(() => {
     let cleanup: (() => void) | undefined;
     (async () => {
       await initSession();
-      if (!id) {
-        failed = true;
-        return;
+      if (id) {
+        share = await loadShare(id);
+        if (share && share.files?.length) {
+          objectUrls = share.files.map((f) => URL.createObjectURL(f.blob));
+          previews = share.files.map((f, i) => ({
+            url: objectUrls[i],
+            isVideo: f.type.startsWith("video"),
+          }));
+          caption = share.text || "";
+          detectMetadata();
+          cleanup = () => objectUrls.forEach((u) => URL.revokeObjectURL(u));
+        } else {
+          failed = true;
+        }
+      } else {
+        // Direct manual creation mode
+        share = { text: "", files: [] };
       }
-      share = await loadShare(id);
-      if (!share || !share.files?.length) {
-        failed = true;
-        return;
-      }
-      objectUrls = share.files.map((f) => URL.createObjectURL(f.blob));
-      previews = share.files.map((f, i) => ({ url: objectUrls[i], isVideo: f.type.startsWith('video') }));
-      caption = share.text || '';
-      detectMetadata();
-      cleanup = () => objectUrls.forEach((u) => URL.revokeObjectURL(u));
     })();
     // Who can be @mentioned: the other half of the journal.
     fetchPeople()
@@ -65,50 +190,167 @@
     };
   });
 
-  // Pull GPS and date from the first photo's EXIF.
-  // Manual overrides always win.
-  async function detectMetadata() {
+  function onFilesSelected(e: Event) {
+    const input = e.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+
+    const newFiles: { name: string; type: string; blob: Blob }[] = [];
+    const newPreviews: { url: string; isVideo: boolean }[] = [];
+
+    Array.from(input.files).forEach((file) => {
+      const url = URL.createObjectURL(file);
+      objectUrls.push(url);
+      newFiles.push({
+        name: file.name,
+        type: file.type,
+        blob: file,
+      });
+      newPreviews.push({
+        url,
+        isVideo: file.type.startsWith("video"),
+      });
+    });
+
+    share = {
+      text: caption,
+      files: [...(share?.files || []), ...newFiles],
+    };
+    previews = [...previews, ...newPreviews];
+
+    detectMetadata();
+    input.value = "";
+  }
+
+  function removeFile(index: number) {
     if (!share) return;
-    const img = share.files.find((f) => f.type.startsWith('image'));
-    if (!img) return;
+    URL.revokeObjectURL(previews[index].url);
+    previews = previews.filter((_, i) => i !== index);
+    share.files = share.files.filter((_, i) => i !== index);
+    if (activeIndex >= previews.length) {
+      activeIndex = Math.max(0, previews.length - 1);
+    }
+  }
+
+  let locationResults = $state<{ display_name: string; lat: string; lon: string }[]>([]);
+  let searchingLoc = $state(false);
+  let showLocSuggestions = $state(false);
+  let searchTimeout: any;
+
+  function onLocInput(val: string) {
+    location = val;
+    lat = null;
+    lng = null;
+    detected = false;
+    clearTimeout(searchTimeout);
+    if (!val || val.trim().length < 2) {
+      locationResults = [];
+      showLocSuggestions = false;
+      return;
+    }
+    searchTimeout = setTimeout(async () => {
+      searchingLoc = true;
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(val.trim())}&limit=5`,
+          { headers: { Accept: "application/json" } },
+        );
+        if (res.ok) {
+          locationResults = await res.json();
+          showLocSuggestions = locationResults.length > 0;
+        }
+      } catch (e) {
+        console.warn("Location search error", e);
+      } finally {
+        searchingLoc = false;
+      }
+    }, 350);
+  }
+
+  function selectLocation(item: { display_name: string; lat: string; lon: string }) {
+    location = item.display_name;
+    lat = parseFloat(item.lat);
+    lng = parseFloat(item.lon);
+    detected = true;
+    showLocSuggestions = false;
+    locationResults = [];
+    locationNote = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  }
+
+  // Pull GPS and date from photo EXIF metadata across uploaded files.
+  async function detectMetadata() {
+    if (!share || !share.files?.length) return;
     detecting = true;
     try {
-      const gps = await exifr.gps(img.blob);
-      if (gps?.latitude != null && gps?.longitude != null) {
-        lat = gps.latitude;
-        lng = gps.longitude;
-        locationNote = `${gps.latitude.toFixed(5)}, ${gps.longitude.toFixed(5)}`;
-        location = locationNote;
-        detected = true;
-        try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${gps.latitude}&lon=${gps.longitude}`,
-            { headers: { Accept: 'application/json' } }
-          );
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.display_name) {
-              location = data.display_name;
+      let foundGps = false;
+      let foundDate = false;
+
+      for (const f of share.files) {
+        // Date detection
+        if (!foundDate) {
+          try {
+            const meta = await exifr.parse(f.blob, {
+              tiff: true,
+              xmp: true,
+              icc: false,
+              jfif: false,
+            });
+            const rawDate = meta?.DateTimeOriginal || meta?.CreateDate || meta?.ModifyDate;
+            const parsed = parseDateValue(rawDate);
+            if (parsed) {
+              postDate = toLocalDatetimeString(parsed);
+              foundDate = true;
+            }
+          } catch {}
+
+          if (!foundDate && (f.blob as any).lastModified) {
+            const parsed = parseDateValue((f.blob as any).lastModified);
+            if (parsed) {
+              postDate = toLocalDatetimeString(parsed);
+              foundDate = true;
             }
           }
-        } catch (e) {
-          console.warn('Reverse geocode failed', e);
         }
-      } else {
-        locationNote = 'No location found in photo.';
-      }
-    } catch {
-      locationNote = 'Could not read photo metadata.';
-    }
 
-    try {
-      const meta = await exifr.parse(img.blob);
-      const rawDate = meta?.DateTimeOriginal || meta?.CreateDate || meta?.ModifyDate;
-      if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
-        postDate = toLocalDatetimeString(rawDate);
+        // GPS detection
+        if (!foundGps) {
+          try {
+            const gps = await exifr.gps(f.blob);
+            const rawLat = Number(gps?.latitude);
+            const rawLng = Number(gps?.longitude);
+
+            if (Number.isFinite(rawLat) && Number.isFinite(rawLng)) {
+              lat = rawLat;
+              lng = rawLng;
+              locationNote = `${rawLat.toFixed(5)}, ${rawLng.toFixed(5)}`;
+              location = locationNote;
+              detected = true;
+              foundGps = true;
+              try {
+                const res = await fetch(
+                  `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${rawLat}&lon=${rawLng}`,
+                  { headers: { Accept: "application/json" } },
+                );
+                if (res.ok) {
+                  const data = await res.json();
+                  if (data?.display_name) {
+                    location = data.display_name;
+                  }
+                }
+              } catch (e) {
+                console.warn("Reverse geocode failed", e);
+              }
+            }
+          } catch {}
+        }
+
+        if (foundGps && foundDate) break;
+      }
+
+      if (!foundGps && !lat) {
+        locationNote = "No GPS in photo — search or pin on map.";
       }
     } catch {
-      // Ignore EXIF date reading error
+      if (!lat) locationNote = "No GPS found in photo.";
     } finally {
       detecting = false;
     }
@@ -144,18 +386,18 @@
   function goTo(i: number) {
     const el = carouselEl;
     if (!el) return;
-    const slides = el.querySelectorAll('.cap-slide');
+    const slides = el.querySelectorAll(".cap-slide");
     const slide = slides[i] as HTMLElement | undefined;
     if (!slide) return;
     const target = slide.offsetLeft - (el.clientWidth - slide.offsetWidth) / 2;
-    el.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
+    el.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
   }
 
   // Which slide is centered is driven by the carousel's own scroll position.
   function onScroll() {
     const el = carouselEl;
     if (!el) return;
-    const slides = el.querySelectorAll('.cap-slide');
+    const slides = el.querySelectorAll(".cap-slide");
     const cx = el.scrollLeft + el.clientWidth / 2;
     let best = 0;
     let bestDist = Infinity;
@@ -172,26 +414,64 @@
   }
 
   function clearLocation() {
-    location = '';
+    location = "";
     lat = null;
     lng = null;
     detected = false;
-    locationNote = '';
+    locationNote = "";
   }
 
   async function post(e: SubmitEvent) {
     e.preventDefault();
-    if (posting || !share || !id) return;
+    if (posting || !share) return;
+    if (!share.files?.length) {
+      error = "Please choose at least one photo or video.";
+      return;
+    }
+    if (!location.trim()) {
+      error = "Location is required for the timeline map.";
+      return;
+    }
     posting = true;
-    error = '';
+    error = "";
     try {
+      // If coordinates weren't set yet (e.g. user typed custom place name without picking dropdown),
+      // do a quick geocode lookup to ensure lat/lng are populated.
+      let finalLat = lat;
+      let finalLng = lng;
+      if (finalLat == null || finalLng == null) {
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(location.trim())}&limit=1`,
+            { headers: { Accept: "application/json" } },
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.[0]?.lat && data?.[0]?.lon) {
+              finalLat = parseFloat(data[0].lat);
+              finalLng = parseFloat(data[0].lon);
+            }
+          }
+        } catch {}
+      }
+
       const isoDate = new Date(postDate).toISOString();
       const mentions = mentioned && otherName ? [otherName] : [];
-      await uploadShare(share, caption.trim(), location.trim(), isoDate, lat, lng, mentions);
-      await dropShare(id);
-      goto('/');
+      await uploadShare(
+        share,
+        caption.trim(),
+        location.trim(),
+        isoDate,
+        finalLat ?? 0,
+        finalLng ?? 0,
+        mentions,
+      );
+      if (id) {
+        await dropShare(id);
+      }
+      goto("/");
     } catch {
-      error = 'Upload failed — check your connection and try again.';
+      error = "Upload failed — check your connection and try again.";
     } finally {
       posting = false;
     }
@@ -199,14 +479,16 @@
 
   async function discard() {
     if (id) await dropShare(id);
-    goto('/');
+    goto("/");
   }
 </script>
 
 <header class="topbar">
   <h1 class="logo logo-lg">Moments</h1>
   <div class="topbar-right">
-    <button class="btn btn-ghost" onclick={discard} disabled={posting}>Cancel</button>
+    <button class="btn btn-ghost" onclick={discard} disabled={posting}
+      >Cancel</button
+    >
   </div>
 </header>
 
@@ -229,57 +511,217 @@
       </div>
     {:else}
       <form onsubmit={post}>
-        <div class="cap-carousel" bind:this={carouselEl} onscroll={onScroll}>
-          {#each previews as p, i (p.url)}
-            <div class="cap-slide">
-              {#if p.isVideo}
-                <!-- svelte-ignore a11y_media_has_caption -->
-                <video src={p.url} controls playsinline></video>
-              {:else}
-                <img src={p.url} alt="Preview {i + 1}" />
-              {/if}
-              {#if previews.length > 1}
-                <div class="cap-reorder">
-                  <button type="button" class="btn-control" disabled={i === 0} onclick={() => moveItem(i, -1)} title="Move left" aria-label="Move left">‹</button>
-                  <button type="button" class="btn-control" disabled={i === previews.length - 1} onclick={() => moveItem(i, 1)} title="Move right" aria-label="Move right">›</button>
-                </div>
-              {/if}
-            </div>
-          {/each}
-        </div>
+        {#if previews.length === 0}
+          <div class="file-picker-box">
+            <input
+              type="file"
+              id="file-input"
+              accept="image/*,video/*"
+              multiple
+              onchange={onFilesSelected}
+              style="display: none;"
+            />
+            <label for="file-input" class="file-picker-label">
+              <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span>Add Photos & Videos</span>
+            </label>
+          </div>
+        {:else}
+          <div class="cap-carousel" bind:this={carouselEl} onscroll={onScroll}>
+            {#each previews as p, i (p.url)}
+              <div class="cap-slide">
+                {#if p.isVideo}
+                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <video src={p.url} controls playsinline></video>
+                {:else}
+                  <img src={p.url} alt="Preview {i + 1}" />
+                {/if}
+
+                <button
+                  type="button"
+                  class="cap-remove-btn"
+                  onclick={() => removeFile(i)}
+                  title="Remove item"
+                  aria-label="Remove item"
+                >
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <path d="M4 4l8 8M12 4l-8 8" />
+                  </svg>
+                </button>
+
+                {#if previews.length > 1}
+                  <div class="cap-reorder">
+                    <button
+                      type="button"
+                      class="btn-control"
+                      disabled={i === 0}
+                      onclick={() => moveItem(i, -1)}
+                      title="Move left"
+                      aria-label="Move left">‹</button
+                    >
+                    <button
+                      type="button"
+                      class="btn-control"
+                      disabled={i === previews.length - 1}
+                      onclick={() => moveItem(i, 1)}
+                      title="Move right"
+                      aria-label="Move right">›</button
+                    >
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+          <div class="add-more-row">
+            <input
+              type="file"
+              id="add-more-input"
+              accept="image/*,video/*"
+              multiple
+              onchange={onFilesSelected}
+              style="display: none;"
+            />
+            <label for="add-more-input" class="btn btn-ghost" style="font-size: 0.85rem; padding: 6px 12px;">
+              + Add more photos/videos
+            </label>
+          </div>
+        {/if}
         {#if previews.length > 1}
           <div class="dots cap-dots">
             {#each previews as p, i (p.url)}
-              <button class:active={i === activeIndex} aria-label="Go to item {i + 1}" onclick={() => goTo(i)}></button>
+              <button
+                class:active={i === activeIndex}
+                aria-label="Go to item {i + 1}"
+                onclick={() => goTo(i)}
+              ></button>
             {/each}
           </div>
         {/if}
 
         <label class="cap-label" for="caption">Caption</label>
-        <textarea class="input" id="caption" bind:value={caption} rows={3} placeholder="Write a caption…" autocomplete="off"></textarea>
+        <textarea
+          class="input"
+          id="caption"
+          bind:value={caption}
+          rows={3}
+          placeholder="Write a caption…"
+          autocomplete="off"
+        ></textarea>
 
         <label class="cap-label" for="date">Date & Time</label>
-        <input class="input" id="date" type="datetime-local" bind:value={postDate} required />
+        <input
+          class="input"
+          id="date"
+          type="datetime-local"
+          bind:value={postDate}
+          required
+        />
 
         <label class="cap-label" for="loc">
-          Location
-          {#if detected}<span class="cap-badge">from photo</span>{/if}
+          Location <span style="color: var(--accent);">*</span>
+          {#if detected}<span class="cap-badge">selected</span>{/if}
           {#if detecting}<span class="cap-hint">detecting…</span>{/if}
+          {#if searchingLoc}<span class="cap-hint">searching…</span>{/if}
           {#if locationNote}<span class="cap-hint">{locationNote}</span>{/if}
         </label>
-        <div class="loc-input">
-          <svg class="loc-pin" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5a5 5 0 0 1 5 5c0 3.5-5 8-5 8s-5-4.5-5-8a5 5 0 0 1 5-5z"/><circle cx="8" cy="6.5" r="1.8"/></svg>
-          <input class="input" id="loc" bind:value={location} oninput={() => { lat = null; lng = null; detected = false; }} placeholder="Add a place…" autocomplete="off" enterkeyhint="done" />
-          {#if location}
-            <button type="button" class="loc-clear" onclick={clearLocation} aria-label="Clear location">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        <div class="loc-input-container">
+          <div class="loc-input-wrapper">
+            <svg
+              class="loc-pin-icon"
+              viewBox="0 0 16 16"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><path
+                d="M8 1.5a5 5 0 0 1 5 5c0 3.5-5 8-5 8s-5-4.5-5-8a5 5 0 0 1 5-5z"
+              /><circle cx="8" cy="6.5" r="1.8" /></svg
+            >
+            <input
+              class="input loc-text-input"
+              id="loc"
+              value={location}
+              oninput={(e) => onLocInput((e.target as HTMLInputElement).value)}
+              placeholder="Search address or tap map to pin…"
+              autocomplete="off"
+              enterkeyhint="done"
+              required
+            />
+            {#if location}
+              <button
+                type="button"
+                class="loc-clear"
+                onclick={clearLocation}
+                aria-label="Clear location"
+              >
+                <svg
+                  viewBox="0 0 16 16"
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg
+                >
+              </button>
+            {/if}
+            <button
+              type="button"
+              class="btn-pin-map"
+              onclick={openMapModal}
+              title="Pin on Map"
+              aria-label="Pin on Map"
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8">
+                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+                <line x1="8" y1="2" x2="8" y2="18"></line>
+                <line x1="16" y1="6" x2="16" y2="22"></line>
+              </svg>
+              <span>Map</span>
             </button>
+          </div>
+
+          {#if showLocSuggestions && locationResults.length > 0}
+            <div class="loc-dropdown">
+              {#each locationResults as item}
+                <button
+                  type="button"
+                  class="loc-item"
+                  onclick={() => selectLocation(item)}
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    style="flex-shrink: 0; margin-top: 2px;"
+                  >
+                    <path d="M8 1.5a5 5 0 0 1 5 5c0 3.5-5 8-5 8s-5-4.5-5-8a5 5 0 0 1 5-5z" />
+                    <circle cx="8" cy="6.5" r="1.8" />
+                  </svg>
+                  <span>{item.display_name}</span>
+                </button>
+              {/each}
+            </div>
           {/if}
         </div>
 
         {#if otherName}
           <label class="cap-label" for="mention-chip">Mention someone</label>
-          <button type="button" id="mention-chip" class="chip" class:on={mentioned} onclick={() => (mentioned = !mentioned)}>
+          <button
+            type="button"
+            id="mention-chip"
+            class="chip"
+            class:on={mentioned}
+            onclick={() => (mentioned = !mentioned)}
+          >
             @{otherName}
           </button>
         {/if}
@@ -288,13 +730,44 @@
 
         <div class="cap-actions">
           <button class="btn btn-primary" type="submit" disabled={posting}>
-            {posting ? 'Posting…' : 'Post'}
+            {posting ? "Posting…" : "Post"}
           </button>
         </div>
       </form>
     {/if}
   </div>
 </main>
+
+{#if showMapModal}
+  <div class="map-modal-overlay">
+    <div class="map-modal">
+      <div class="map-modal-header">
+        <div>
+          <h3>Pin Location on Map</h3>
+          <p class="map-modal-subtitle">Tap or drag the pin to your exact spot</p>
+        </div>
+        <button type="button" class="icon-btn" onclick={closeMapModal} aria-label="Close">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="map-modal-canvas-wrapper">
+        <div class="map-modal-canvas" bind:this={pickerMapContainer}></div>
+        <div class="map-modal-crosshair"></div>
+      </div>
+
+      <div class="map-modal-footer">
+        <span class="coord-tag">{pickerTempLat.toFixed(5)}, {pickerTempLng.toFixed(5)}</span>
+        <div class="map-modal-actions">
+          <button type="button" class="btn btn-ghost" onclick={closeMapModal}>Cancel</button>
+          <button type="button" class="btn btn-primary" onclick={confirmMapLocation}>Set Location</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .cap-carousel {
@@ -306,12 +779,14 @@
     scrollbar-width: none;
     padding: 2px 0 10px;
   }
-  .cap-carousel::-webkit-scrollbar { display: none; }
+  .cap-carousel::-webkit-scrollbar {
+    display: none;
+  }
   .cap-slide {
     position: relative;
     flex: 0 0 78%;
     scroll-snap-align: center;
-    aspect-ratio: 4 / 3;
+    aspect-ratio: 1 / 1;
     border-radius: var(--radius-sm);
     overflow: hidden;
     background: #000;
@@ -321,6 +796,31 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+  .cap-remove-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: rgba(18, 18, 22, 0.72);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: rgba(255, 255, 255, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 10;
+    transition: background 0.18s, color 0.18s, transform 0.18s;
+  }
+  .cap-remove-btn:hover {
+    background: var(--danger, #ff5e5e);
+    color: #fff;
+    border-color: transparent;
+    transform: scale(1.08);
   }
   .cap-reorder {
     position: absolute;
@@ -347,7 +847,9 @@
     justify-content: center;
     cursor: pointer;
     border-radius: 4px;
-    transition: background 0.2s, opacity 0.2s;
+    transition:
+      background 0.2s,
+      opacity 0.2s;
   }
   .btn-control:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.2);
