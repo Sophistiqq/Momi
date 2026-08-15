@@ -790,3 +790,155 @@ main {
   .media-cell { flex: 1 1 auto; width: auto; aspect-ratio: auto; min-width: 0; }
   .info-cell { flex: 0 0 400px; width: 400px; border-top: 0; border-left: 1px solid var(--border); }
 }
+
+/* ---- Trash Overlay ---- */
+.trash-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slide-up-in 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes slide-up-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.trash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(9, 9, 11, 0.9);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.trash-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 0 calc(32px + env(safe-area-inset-bottom));
+}
+
+.trash-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 14px 18px 6px;
+  text-align: center;
+}
+
+.trash-list {
+  list-style: none;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.trash-card {
+  background: rgba(18, 18, 22, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.trash-card.confirming {
+  border-color: var(--danger);
+}
+
+.trash-thumb-strip {
+  display: flex;
+  gap: 2px;
+  height: 120px;
+  overflow: hidden;
+}
+.trash-thumb {
+  flex: 1 1 0;
+  height: 100%;
+  object-fit: cover;
+  min-width: 0;
+}
+.trash-thumb-video,
+.trash-thumb-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.trash-info {
+  padding: 12px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.trash-caption {
+  font-size: 0.9rem;
+  color: var(--text);
+  line-height: 1.4;
+}
+.trash-date {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.trash-location {
+  font-size: 0.75rem;
+  color: var(--muted);
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.trash-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+.trash-restore-btn {
+  flex: 1;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  gap: 6px;
+}
+.trash-restore-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+.trash-purge-btn {
+  flex: 1;
+  background: rgba(255, 80, 80, 0.1);
+  color: var(--danger);
+  border: 1px solid rgba(255, 80, 80, 0.2);
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  gap: 6px;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+}
+.trash-purge-btn:hover:not(:disabled):not(.btn-danger) {
+  background: rgba(255, 80, 80, 0.2);
+}
+
+.spinner-sm {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}

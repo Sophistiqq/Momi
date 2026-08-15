@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import PostViewer from "$lib/PostViewer.svelte";
   import MapTimeline from "$lib/MapTimeline.svelte";
-  import { fetchPosts, formatDate, type Post } from "$lib/api";
+  import { fetchPosts, formatDate, formatDateTime, purgePost, restorePost, type Post } from "$lib/api";
   import { session, initSession, signOut } from "$lib/session.svelte";
   import { initPushNotifications } from "$lib/push";
 
@@ -11,18 +11,27 @@
   let error = $state(false);
   let activePost = $state<Post | null>(null);
   let focusedPostId = $state<string | null>(null);
-  let showTrash = $state(false);
   let showConnectors = $state(false);
+
+  // Trash overlay state
+  let showTrash = $state(false);
+  let trashPosts = $state<Post[]>([]);
+  let trashLoading = $state(false);
+  let trashError = $state(false);
+  let purgingId = $state<string | null>(null);
+  let restoringId = $state<string | null>(null);
+  let confirmPurgeId = $state<string | null>(null);
 
   let countText = $derived(
     posts.length
-      ? `${posts.length} moment${posts.length > 1 ? "s" : ""}${showTrash ? " in trash" : ""}`
+      ? `${posts.length} moment${posts.length > 1 ? "s" : ""}`
       : "",
   );
 
   onMount(async () => {
     window.addEventListener("popstate", () => {
       if (activePost) activePost = null;
+      else if (showTrash) showTrash = false;
     });
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") load(true);
@@ -68,7 +77,7 @@
     if (!silent) loading = true;
     error = false;
     try {
-      posts = await fetchPosts(showTrash ? "trash" : undefined);
+      posts = await fetchPosts();
       if (posts.length > 0 && !focusedPostId) {
         focusedPostId = posts[0].id;
       }
@@ -83,9 +92,55 @@
     }
   }
 
-  async function toggleTrash() {
-    showTrash = !showTrash;
-    await load();
+  async function openTrash() {
+    showTrash = true;
+    history.pushState({ trash: true }, "");
+    trashLoading = true;
+    trashError = false;
+    confirmPurgeId = null;
+    try {
+      trashPosts = await fetchPosts("trash");
+    } catch {
+      trashError = true;
+    } finally {
+      trashLoading = false;
+    }
+  }
+
+  function closeTrash() {
+    showTrash = false;
+    confirmPurgeId = null;
+    if (history.state?.trash) history.back();
+  }
+
+  async function handleRestore(post: Post) {
+    restoringId = post.id;
+    try {
+      const ok = await restorePost(post.id);
+      if (ok) {
+        trashPosts = trashPosts.filter((p) => p.id !== post.id);
+        await load(true);
+      }
+    } finally {
+      restoringId = null;
+    }
+  }
+
+  async function handlePurge(post: Post) {
+    if (confirmPurgeId !== post.id) {
+      confirmPurgeId = post.id;
+      return;
+    }
+    purgingId = post.id;
+    confirmPurgeId = null;
+    try {
+      const ok = await purgePost(post.id);
+      if (ok) {
+        trashPosts = trashPosts.filter((p) => p.id !== post.id);
+      }
+    } finally {
+      purgingId = null;
+    }
   }
 
   function handleDeletePost(postId: string) {
@@ -154,7 +209,7 @@
   <!-- Auth is handled in +layout.svelte; this branch should not render -->
 {:else}
   <header class="topbar">
-    <span class="logo logo-lg">{showTrash ? "Trash" : "Moments"}</span>
+    <span class="logo logo-lg">Moments</span>
     <div class="topbar-right">
       {#if countText}<span class="count">{countText}</span>{/if}
       <button
@@ -193,37 +248,12 @@
         <button
           popovertarget="app-menu"
           popovertargetaction="hide"
-          onclick={toggleTrash}
+          onclick={openTrash}
         >
-          {#if showTrash}
-            <svg
-              viewBox="0 0 16 16"
-              width="16"
-              height="16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              ><path d="M1.5 8h13M1.5 8l4-4M1.5 8l4 4" /></svg
-            >
-            Back to feed
-          {:else}
-            <svg
-              viewBox="0 0 16 16"
-              width="16"
-              height="16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              ><path
-                d="M2.5 3.5h11M5.5 3.5v-1a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1m-7 0v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-10M6.5 6.5v5m3-5v5"
-              /></svg
-            >
-            Trash
-          {/if}
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+            ><path d="M2.5 3.5h11M5.5 3.5v-1a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1m-7 0v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-10M6.5 6.5v5m3-5v5" /></svg
+          >
+          Trash
         </button>
         <button
           popovertarget="app-menu"
@@ -231,18 +261,8 @@
           onclick={signOutAndReset}
           style="color: var(--danger);"
         >
-          <svg
-            viewBox="0 0 16 16"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            ><path
-              d="M10 3.5h2.5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H10M6 5.5L3.5 8 6 10.5M14 8H3.5"
-            /></svg
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+            ><path d="M10 3.5h2.5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H10M6 5.5L3.5 8 6 10.5M14 8H3.5" /></svg
           >
           Sign out
         </button>
@@ -281,12 +301,8 @@
       </div>
     {:else if posts.length === 0}
       <div class="state show">
-        <h2>{showTrash ? "Trash is empty" : "Nothing here yet"}</h2>
-        <p>
-          {showTrash
-            ? "Your deleted moments will appear here."
-            : "Share a photo or video from your gallery — it&rsquo;ll land right here."}
-        </p>
+        <h2>Nothing here yet</h2>
+        <p>Share a photo or video from your gallery — it&rsquo;ll land right here.</p>
       </div>
     {:else}
       <div class="snap-feed-wrapper">
@@ -347,5 +363,114 @@
       onDelete={handleDeletePost}
       onRestore={handleRestorePost}
     />
+  {/if}
+
+  <!-- ---- Trash Overlay ---- -->
+  {#if showTrash}
+    <div class="trash-overlay" role="dialog" aria-modal="true" aria-label="Trash">
+      <header class="trash-header">
+        <button class="icon-btn" onclick={closeTrash} aria-label="Close trash">
+          <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M10 3L5 8l5 5" />
+          </svg>
+        </button>
+        <span class="logo" style="font-size:1.1rem;">Trash</span>
+        <span class="count" style="visibility: {trashPosts.length ? 'visible' : 'hidden'}">
+          {trashPosts.length} item{trashPosts.length !== 1 ? 's' : ''}
+        </span>
+      </header>
+
+      <div class="trash-body">
+        {#if trashLoading}
+          <div class="state show" style="min-height: 40vh;">
+            <div class="spinner"></div>
+          </div>
+        {:else if trashError}
+          <div class="state show" style="min-height: 40vh;">
+            <h2>Couldn&rsquo;t load</h2>
+            <button class="btn btn-primary" onclick={openTrash}>Retry</button>
+          </div>
+        {:else if trashPosts.length === 0}
+          <div class="state show" style="min-height: 50vh;">
+            <svg viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.3">
+              <path d="M6 12h36M18 12V8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4M20 22v12m8-12v12" />
+              <rect x="10" y="12" width="28" height="30" rx="3" />
+            </svg>
+            <h2>Trash is empty</h2>
+            <p style="color: var(--muted); font-size:.9rem;">Deleted moments will appear here.</p>
+          </div>
+        {:else}
+          <p class="trash-hint">Items in trash can be restored or permanently deleted to free up storage.</p>
+          <ul class="trash-list">
+            {#each trashPosts as post (post.id)}
+              <li class="trash-card" class:confirming={confirmPurgeId === post.id}>
+                {#if (post.post_media?.length ?? 0) > 0}
+                  <div class="trash-thumb-strip">
+                    {#each post.post_media.slice(0, 3) as m}
+                      {#if m.mime_type.startsWith('video')}
+                        <div class="trash-thumb trash-thumb-video">
+                          <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" style="opacity:.7"><path d="M6 4l7 4-7 4V4z"/></svg>
+                        </div>
+                      {:else}
+                        <img class="trash-thumb" src={m.url} alt="" loading="lazy" />
+                      {/if}
+                    {/each}
+                    {#if post.post_media.length > 3}
+                      <div class="trash-thumb trash-thumb-more">+{post.post_media.length - 3}</div>
+                    {/if}
+                  </div>
+                {/if}
+
+                <div class="trash-info">
+                  {#if post.caption}
+                    <p class="trash-caption">{post.caption.length > 120 ? post.caption.slice(0,120) + '…' : post.caption}</p>
+                  {/if}
+                  <time class="trash-date" datetime={post.created_at}>
+                    {formatDateTime(post.created_at)}
+                  </time>
+                  {#if post.location}
+                    <span class="trash-location">
+                      <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" style="opacity:.5;flex-shrink:0"><path d="M8 1a4.5 4.5 0 0 0-4.5 4.5C3.5 9 8 15 8 15s4.5-6 4.5-9.5A4.5 4.5 0 0 0 8 1zm0 6a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>
+                      {post.location.length > 60 ? post.location.slice(0,60)+'…' : post.location}
+                    </span>
+                  {/if}
+                </div>
+
+                <div class="trash-actions">
+                  <button
+                    class="btn btn-ghost trash-restore-btn"
+                    onclick={() => handleRestore(post)}
+                    disabled={restoringId === post.id || purgingId === post.id}
+                  >
+                    {#if restoringId === post.id}
+                      <span class="spinner-sm"></span>
+                    {:else}
+                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 8a6 6 0 1 0 1.5-3.9M2 3.5V8h4.5"/></svg>
+                    {/if}
+                    Restore
+                  </button>
+                  <button
+                    class="btn trash-purge-btn"
+                    class:btn-danger={confirmPurgeId === post.id}
+                    onclick={() => handlePurge(post)}
+                    disabled={purgingId === post.id || restoringId === post.id}
+                  >
+                    {#if purgingId === post.id}
+                      <span class="spinner-sm"></span>
+                    {:else if confirmPurgeId === post.id}
+                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 8h12M8 2l6 6-6 6"/></svg>
+                      Confirm delete
+                    {:else}
+                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11M5.5 3.5v-1a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1m-7 0v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-10"/></svg>
+                      Delete forever
+                    {/if}
+                  </button>
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    </div>
   {/if}
 {/if}

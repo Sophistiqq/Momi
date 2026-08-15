@@ -84,6 +84,23 @@ export async function deletePost(postId: string): Promise<boolean> {
   return res.ok;
 }
 
+/** Permanently removes a post that is already in trash (storage + DB). */
+export async function purgePost(postId: string): Promise<boolean> {
+  // First DELETE soft-trashes; second DELETE on an already-trashed post hard-deletes.
+  // Since we only call this from the trash view the post is already trashed,
+  // so one DELETE call triggers the hard-delete branch in the edge function.
+  const res = await fetch(`/share-target/posts/${postId}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json' },
+  });
+  return res.ok;
+}
+
+/** Restore a trashed post back to the main feed. */
+export async function restorePost(postId: string): Promise<boolean> {
+  return updatePost(postId, { status: 'pending_style' });
+}
+
 export function formatDate(s: string | number | Date): string {
   return new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
