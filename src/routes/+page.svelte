@@ -12,6 +12,7 @@
   let activePost = $state<Post | null>(null);
   let focusedPostId = $state<string | null>(null);
   let showConnectors = $state(false);
+  let showScrubber = $state(true);
 
   // Trash overlay state
   let showTrash = $state(false);
@@ -170,10 +171,44 @@
     posts = posts.filter((p) => p.id !== postId);
   }
 
-  function focusPost(post: Post): void {
+  let scrubberActive = $state(false);
+  let scrubberTrackEl = $state<HTMLDivElement | undefined>();
+
+  let focusedIndex = $derived(
+    posts.findIndex((p) => p.id === focusedPostId) !== -1
+      ? posts.findIndex((p) => p.id === focusedPostId)
+      : 0
+  );
+
+  let scrubberPercent = $derived(
+    posts.length > 1
+      ? (focusedIndex / (posts.length - 1)) * 100
+      : 0
+  );
+
+  function handleScrubberInput(e: Event) {
+    const target = e.target as HTMLInputElement;
+    const index = parseInt(target.value, 10);
+    if (posts[index]) {
+      focusPost(posts[index], "auto");
+    }
+  }
+
+  function handleScrubberTouch(clientY: number) {
+    if (!scrubberTrackEl || posts.length === 0) return;
+    const rect = scrubberTrackEl.getBoundingClientRect();
+    const clampedY = Math.max(0, Math.min(rect.height, clientY - rect.top));
+    const ratio = clampedY / rect.height;
+    const index = Math.min(posts.length - 1, Math.max(0, Math.round(ratio * (posts.length - 1))));
+    if (posts[index]) {
+      focusPost(posts[index], "auto");
+    }
+  }
+
+  function focusPost(post: Post, behavior: ScrollBehavior = "smooth"): void {
     focusedPostId = post.id;
     const slide = document.querySelector(`[data-post-id="${post.id}"]`);
-    slide?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    slide?.scrollIntoView({ behavior, inline: "center", block: "nearest" });
   }
 
   function openPost(post: Post): void {
@@ -231,20 +266,6 @@
     <span class="logo logo-lg">Moments</span>
     <div class="topbar-right">
       {#if countText}<span class="count">{countText}</span>{/if}
-      <button
-        type="button"
-        class="icon-btn"
-        class:active-btn={showConnectors}
-        onclick={() => (showConnectors = !showConnectors)}
-        aria-label={showConnectors ? "Hide route lines" : "Show route lines"}
-        title={showConnectors ? "Hide route lines" : "Show route lines"}
-      >
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="6" cy="18" r="3"></circle>
-          <circle cx="18" cy="6" r="3"></circle>
-          <path d="M8.5 15.5l7-7"></path>
-        </svg>
-      </button>
       <a href="/customize" class="icon-btn add-btn" aria-label="Create new post" title="New post">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
           <path d="M8 3v10M3 8h10" />
@@ -264,6 +285,40 @@
         >
       </button>
       <div class="app-menu" id="app-menu" popover>
+        <button
+          onclick={() => (showScrubber = !showScrubber)}
+          class="menu-toggle-item"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="4" y1="21" x2="4" y2="14"></line>
+            <line x1="4" y1="10" x2="4" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12" y2="3"></line>
+            <line x1="20" y1="21" x2="20" y2="16"></line>
+            <line x1="20" y1="12" x2="20" y2="3"></line>
+            <line x1="1" y1="14" x2="7" y2="14"></line>
+            <line x1="9" y1="8" x2="15" y2="8"></line>
+            <line x1="17" y1="16" x2="23" y2="16"></line>
+          </svg>
+          <span style="flex:1;">Timeline slider</span>
+          <span class="menu-pill" class:pill-active={showScrubber}>{showScrubber ? "ON" : "OFF"}</span>
+        </button>
+
+        <button
+          onclick={() => (showConnectors = !showConnectors)}
+          class="menu-toggle-item"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="6" cy="18" r="3"></circle>
+            <circle cx="18" cy="6" r="3"></circle>
+            <path d="M8.5 15.5l7-7"></path>
+          </svg>
+          <span style="flex:1;">Route lines</span>
+          <span class="menu-pill" class:pill-active={showConnectors}>{showConnectors ? "ON" : "OFF"}</span>
+        </button>
+
+        <div class="menu-divider"></div>
+
         <button
           popovertarget="app-menu"
           popovertargetaction="hide"
@@ -348,6 +403,75 @@
         <p>Share a photo or video from your gallery — it&rsquo;ll land right here.</p>
       </div>
     {:else}
+      <!-- Left side vertical scrubber slider -->
+      {#if showScrubber && posts.length > 1}
+        <aside
+          class="timeline-scrubber-wrapper"
+          class:active={scrubberActive}
+          aria-label="Timeline Scrubber"
+        >
+          <div
+            class="scrubber-capsule"
+            bind:this={scrubberTrackEl}
+            role="slider"
+            tabindex="0"
+            aria-valuemin="0"
+            aria-valuemax={posts.length - 1}
+            aria-valuenow={focusedIndex}
+            aria-valuetext={`Moment ${focusedIndex + 1} of ${posts.length}`}
+            ontouchstart={(e) => {
+              scrubberActive = true;
+              handleScrubberTouch(e.touches[0].clientY);
+            }}
+            ontouchmove={(e) => {
+              if (scrubberActive) handleScrubberTouch(e.touches[0].clientY);
+            }}
+            ontouchend={() => (scrubberActive = false)}
+            onmousedown={(e) => {
+              scrubberActive = true;
+              handleScrubberTouch(e.clientY);
+              const onMove = (ev: MouseEvent) => handleScrubberTouch(ev.clientY);
+              const onUp = () => {
+                scrubberActive = false;
+                window.removeEventListener("mousemove", onMove);
+                window.removeEventListener("mouseup", onUp);
+              };
+              window.addEventListener("mousemove", onMove);
+              window.addEventListener("mouseup", onUp);
+            }}
+          >
+            <!-- Notch ticks inside capsule -->
+            <div class="scrubber-ticks" aria-hidden="true">
+              <span class="scrubber-tick major"></span>
+              <span class="scrubber-tick"></span>
+              <span class="scrubber-tick"></span>
+              <span class="scrubber-tick major"></span>
+              <span class="scrubber-tick"></span>
+              <span class="scrubber-tick"></span>
+              <span class="scrubber-tick major"></span>
+            </div>
+
+            <div class="scrubber-track">
+              <div class="scrubber-progress" style="height: {scrubberPercent}%;"></div>
+            </div>
+
+            <div
+              class="scrubber-thumb"
+              style="top: {scrubberPercent}%;"
+            >
+              <span class="scrubber-thumb-dot"></span>
+              <div class="scrubber-bubble">
+                <span class="bubble-num">{focusedIndex + 1}</span>
+                <span class="bubble-total">/{posts.length}</span>
+                {#if posts[focusedIndex]}
+                  <span class="bubble-date">{formatDate(posts[focusedIndex].created_at)}</span>
+                {/if}
+              </div>
+            </div>
+          </div>
+        </aside>
+      {/if}
+
       <div class="snap-feed-wrapper">
         <div class="snap-feed" use:setupObserver={posts}>
           {#each posts as post (post.id)}
