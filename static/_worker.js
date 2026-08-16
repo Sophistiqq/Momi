@@ -26,7 +26,7 @@ export default {
 
       headers.set('Authorization', `Bearer ${env.SUPABASE_ANON_KEY}`);
 
-      return fetch(SUPABASE_FUNCTION + url.pathname.slice('/share-target'.length), {
+      return fetch(SUPABASE_FUNCTION + url.pathname.slice('/share-target'.length) + url.search, {
         method: request.method,
         headers,
         body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
