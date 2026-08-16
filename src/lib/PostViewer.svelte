@@ -475,6 +475,50 @@
 
       <!-- Info & Comments Sidebar/Panel -->
       <div class="pv-info-cell">
+        <!-- Caption / Edit Section -->
+        <div class="pv-caption-wrap">
+          {#if !editingPost}
+            <div class="pv-caption-box">
+              <p class="pv-caption-text" class:pv-muted={!post.caption}>
+                {post.caption || "No caption provided"}
+              </p>
+
+              {#if post.mentions?.length}
+                <div class="pv-mentions">
+                  {#each post.mentions as mention (mention)}
+                    <span class="pv-mention-pill">@{mention}</span>
+                  {/each}
+                </div>
+              {/if}
+
+              <time class="pv-timestamp" datetime={post.created_at}>
+                {formatDateTime(post.created_at)}
+              </time>
+            </div>
+          {:else}
+            <div class="pv-edit-form">
+              <textarea
+                class="input"
+                bind:value={captionDraft}
+                rows={3}
+                placeholder="Write a caption…"
+                onkeydown={(e) => e.ctrlKey && e.key === "Enter" && submitPost()}
+              ></textarea>
+              <input
+                class="input"
+                bind:value={locationDraft}
+                placeholder="Add or update location…"
+                style="margin-top: 8px;"
+                onkeydown={(e) => e.ctrlKey && e.key === "Enter" && submitPost()}
+              />
+              <div class="caption-edit-actions">
+                <button class="btn btn-ghost" onclick={() => (editingPost = false)}>Cancel</button>
+                <button class="btn btn-primary" onclick={submitPost}>Save</button>
+              </div>
+            </div>
+          {/if}
+        </div>
+
         <!-- Actions Bar -->
         <div class="pv-actions">
           <button
@@ -550,52 +594,8 @@
           {/if}
         </div>
 
-        <!-- Scrollable Details & Comments -->
+        <!-- Scrollable Comments -->
         <div class="pv-scroll">
-          <!-- Caption / Edit Section -->
-          {#if !editingPost}
-            <div class="pv-caption-box">
-              <p class="pv-caption-text" class:pv-muted={!post.caption}>
-                <span class="pv-caption-author">{post.author?.split(" ")[0] ?? "Them"}</span>
-                {post.caption || "No caption provided"}
-              </p>
-
-              {#if post.mentions?.length}
-                <div class="pv-mentions">
-                  {#each post.mentions as mention (mention)}
-                    <span class="pv-mention-pill">@{mention}</span>
-                  {/each}
-                </div>
-              {/if}
-
-              <time class="pv-timestamp" datetime={post.created_at}>
-                {formatDateTime(post.created_at)}
-              </time>
-            </div>
-          {:else}
-            <div class="pv-edit-form">
-              <textarea
-                class="input"
-                bind:value={captionDraft}
-                rows={3}
-                placeholder="Write a caption…"
-                onkeydown={(e) => e.ctrlKey && e.key === "Enter" && submitPost()}
-              ></textarea>
-              <input
-                class="input"
-                bind:value={locationDraft}
-                placeholder="Add or update location…"
-                style="margin-top: 8px;"
-                onkeydown={(e) => e.ctrlKey && e.key === "Enter" && submitPost()}
-              />
-              <div class="caption-edit-actions">
-                <button class="btn btn-ghost" onclick={() => (editingPost = false)}>Cancel</button>
-                <button class="btn btn-primary" onclick={submitPost}>Save</button>
-              </div>
-            </div>
-          {/if}
-
-          <!-- Comments Section -->
           <div class="pv-comments-section">
             <div class="pv-comments-header">
               <span>Comments</span>
@@ -623,8 +623,10 @@
                       {c.author?.charAt(0).toUpperCase() ?? "?"}
                     </div>
                     <div class="stl-comment-body">
-                      <span class="stl-comment-author">{c.author ?? "Anonymous"}</span>
-                      <span class="stl-comment-text">{c.body}</span>
+                      <div class="stl-comment-content">
+                        <strong class="stl-comment-author">{c.author ?? "Anonymous"}</strong>
+                        <span class="stl-comment-text">{c.body}</span>
+                      </div>
                       <time class="stl-comment-time">{relativeTime(c.created_at)}</time>
                     </div>
                   </div>
@@ -980,6 +982,11 @@
     border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
 
+  .pv-caption-wrap {
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
   .pv-actions {
     display: flex;
     align-items: center;
@@ -1096,11 +1103,11 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 14px 16px 8px;
+    padding: 0 16px 8px;
   }
 
   .pv-caption-box {
-    margin-bottom: 16px;
+    padding: 14px 16px 12px;
   }
 
   .pv-caption-text {
@@ -1146,12 +1153,11 @@
   }
 
   .pv-edit-form {
-    margin-bottom: 16px;
+    padding: 14px 16px 12px;
   }
 
   /* Comments section */
   .pv-comments-section {
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
     padding-top: 14px;
   }
 
@@ -1235,26 +1241,33 @@
     justify-content: center;
     flex-shrink: 0;
     border: 1px solid rgba(217, 160, 102, 0.25);
+    margin-top: 1px;
   }
 
   .stl-comment-body {
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px;
-    font-size: 0.84rem;
-    line-height: 1.4;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .stl-comment-content {
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: var(--text);
+    word-break: break-word;
   }
 
   .stl-comment-author {
     font-weight: 700;
     color: var(--text);
-    font-size: 0.8rem;
+    font-size: 0.82rem;
+    margin-right: 5px;
   }
 
   .stl-comment-text {
     color: var(--text);
-    word-break: break-word;
   }
 
   .stl-comment-time {

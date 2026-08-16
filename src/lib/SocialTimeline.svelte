@@ -264,8 +264,7 @@
         {#if post.caption}
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
           <div class="stl-caption" role="button" tabindex="0" onclick={() => onOpenPost(post)}>
-            <span class="stl-caption-author">{post.author?.split(" ")[0] ?? "Them"}</span>
-            {" "}{post.caption.length > 120 ? post.caption.slice(0, 120) + "…" : post.caption}
+            {post.caption}
           </div>
         {/if}
 
@@ -368,8 +367,10 @@
                       {c.author?.charAt(0).toUpperCase() ?? "?"}
                     </div>
                     <div class="stl-comment-body">
-                      <span class="stl-comment-author">{c.author ?? "Anonymous"}</span>
-                      <span class="stl-comment-text">{c.body}</span>
+                      <div class="stl-comment-content">
+                        <strong class="stl-comment-author">{c.author || "Anonymous"}</strong>
+                        <span class="stl-comment-text">{c.body}</span>
+                      </div>
                       <time class="stl-comment-time">{relativeTime(c.created_at)}</time>
                     </div>
                   </div>
@@ -605,33 +606,52 @@
   .stl-actions {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 6px 10px 6px;
+    gap: 4px;
+    padding: 6px 12px;
   }
 
   .stl-actions-spacer { flex: 1; }
 
   .stl-action-btn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 6px 8px;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 8px;
+    height: 36px;
     border-radius: 8px;
     color: var(--muted);
+    font: inherit;
+    border: none;
+    background: transparent;
     transition: color 0.18s, background 0.18s, transform 0.18s;
     cursor: pointer;
+    line-height: 1;
+    box-sizing: border-box;
+    vertical-align: middle;
   }
 
   .stl-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
   .stl-action-btn:active { transform: scale(0.88); }
   .stl-action-btn.stl-liked { color: #ff5577; }
   .stl-action-btn.stl-active { color: var(--accent); }
-  .stl-action-icon { display: flex; align-items: center; }
+  
+  .stl-action-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+  }
 
   .stl-action-count {
-    font-size: 0.78rem;
+    font-size: 0.82rem;
     font-weight: 600;
     line-height: 1;
+    font-variant-numeric: tabular-nums;
+    display: inline-flex;
+    align-items: center;
   }
 
   .stl-heart-icon {
@@ -642,16 +662,18 @@
 
   .stl-map-btn,
   .stl-open-btn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 5px 10px;
+    padding: 0 10px;
+    height: 30px;
     border-radius: 8px;
     font-size: 0.75rem;
     font-weight: 600;
     cursor: pointer;
     transition: color 0.18s, background 0.18s, transform 0.18s;
     letter-spacing: 0.02em;
+    box-sizing: border-box;
   }
 
   .stl-map-btn {
@@ -737,20 +759,40 @@
     justify-content: center;
     flex-shrink: 0;
     border: 1px solid rgba(217, 160, 102, 0.25);
+    margin-top: 1px;
   }
 
   .stl-comment-body {
     display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px;
-    font-size: 0.84rem;
-    line-height: 1.4;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
   }
 
-  .stl-comment-author { font-weight: 700; color: var(--text); font-size: 0.8rem; }
-  .stl-comment-text { color: var(--text); word-break: break-word; }
-  .stl-comment-time { font-size: 0.68rem; color: var(--muted); white-space: nowrap; }
+  .stl-comment-content {
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: var(--text);
+    word-break: break-word;
+  }
+
+  .stl-comment-author {
+    font-weight: 700;
+    color: var(--text);
+    font-size: 0.82rem;
+    margin-right: 5px;
+  }
+
+  .stl-comment-text {
+    color: var(--text);
+  }
+
+  .stl-comment-time {
+    font-size: 0.68rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
 
   .stl-composer {
     display: flex;
