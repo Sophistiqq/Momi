@@ -4,7 +4,17 @@
   import PostViewer from "$lib/PostViewer.svelte";
   import MapTimeline from "$lib/MapTimeline.svelte";
   import SocialTimeline from "$lib/SocialTimeline.svelte";
-  import { fetchPosts, fetchComments, getCachedPosts, formatDate, formatDateTime, purgePost, restorePost, type Post, type Comment } from "$lib/api";
+  import {
+    fetchPosts,
+    fetchComments,
+    getCachedPosts,
+    formatDate,
+    formatDateTime,
+    purgePost,
+    restorePost,
+    type Post,
+    type Comment,
+  } from "$lib/api";
   import { session, initSession, signOut } from "$lib/session.svelte";
   import { initPushNotifications } from "$lib/push";
 
@@ -16,6 +26,12 @@
   let showConnectors = $state(false);
   let showScrubber = $state(true);
   let activeTab = $state<"map" | "timeline">("timeline");
+
+  // When set, the slide IntersectionObserver is ignored so a programmatic
+  // selection (marker tap / scrubber) stays authoritative and can't be
+  // overridden by slides crossing the threshold during the scroll. It's
+  // released the moment the user manually scrolls the feed.
+  let focusLock = false;
 
   // Trash overlay state
   let showTrash = $state(false);
@@ -31,7 +47,11 @@
   const commentsCachePrefetching = new Set<string>();
 
   async function prefetchPostComments(postId: string) {
-    if (commentsCache[postId] !== undefined || commentsCachePrefetching.has(postId)) return;
+    if (
+      commentsCache[postId] !== undefined ||
+      commentsCachePrefetching.has(postId)
+    )
+      return;
     const post = posts.find((p) => p.id === postId);
     const knownCount = post?.comment_count ?? post?.comments_count ?? -1;
     if (knownCount === 0) {
@@ -54,9 +74,7 @@
   });
 
   let countText = $derived(
-    posts.length
-      ? `${posts.length} moment${posts.length > 1 ? "s" : ""}`
-      : "",
+    posts.length ? `${posts.length} moment${posts.length > 1 ? "s" : ""}` : "",
   );
 
   onMount(() => {
@@ -76,11 +94,21 @@
   function setupObserver(node: HTMLElement, _postsList: Post[]) {
     let observer: IntersectionObserver | null = null;
 
+    // Any manual scroll gesture hands focus back to the observer so swiping
+    // keeps the map camera + highlighted card in sync.
+    const releaseLock = () => {
+      focusLock = false;
+    };
+    node.addEventListener("pointerdown", releaseLock);
+    node.addEventListener("touchstart", releaseLock);
+    node.addEventListener("wheel", releaseLock);
+
     function attach() {
       if (observer) observer.disconnect();
       observer = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
+            if (focusLock) return;
             if (entry.isIntersecting) {
               const id = entry.target.getAttribute("data-post-id");
               if (id) focusedPostId = id;
@@ -105,6 +133,9 @@
       },
       destroy() {
         if (observer) observer.disconnect();
+        node.removeEventListener("pointerdown", releaseLock);
+        node.removeEventListener("touchstart", releaseLock);
+        node.removeEventListener("wheel", releaseLock);
       },
     };
   }
@@ -207,13 +238,11 @@
   let focusedIndex = $derived(
     posts.findIndex((p) => p.id === focusedPostId) !== -1
       ? posts.findIndex((p) => p.id === focusedPostId)
-      : 0
+      : 0,
   );
 
   let scrubberPercent = $derived(
-    posts.length > 1
-      ? (focusedIndex / (posts.length - 1)) * 100
-      : 0
+    posts.length > 1 ? (focusedIndex / (posts.length - 1)) * 100 : 0,
   );
 
   // --- Pagination (client-side windowing) ---
@@ -226,6 +255,22 @@
     visibleCount = Math.min(visibleCount + PAGE_SIZE, posts.length);
   }
 
+  // Make sure a given post's index is within the currently rendered window.
+  // Needed any time we're about to scrollIntoView/querySelector a post that
+  // might not exist in the DOM yet because pagination hasn't revealed it
+  // (e.g. a map marker tap or scrubber jump targeting a post past the
+  // current visibleCount).
+  function ensureVisible(postId: string | null): void {
+    if (!postId) return;
+    const idx = posts.findIndex((p) => p.id === postId);
+    if (idx !== -1 && idx >= visibleCount) {
+      visibleCount = Math.min(
+        posts.length,
+        Math.ceil((idx + 1) / PAGE_SIZE) * PAGE_SIZE,
+      );
+    }
+  }
+
   // Svelte action: attach an IntersectionObserver to sentinel elements so
   // that scrolling near the end automatically reveals the next batch.
   function setupSentinel(node: HTMLElement) {
@@ -233,10 +278,14 @@
       (entries) => {
         if (entries[0].isIntersecting) loadMore();
       },
-      { rootMargin: '200px' }
+      { rootMargin: "200px" },
     );
     observer.observe(node);
-    return { destroy() { observer.disconnect(); } };
+    return {
+      destroy() {
+        observer.disconnect();
+      },
+    };
   }
 
   // Reset visible window whenever the full post list refreshes
@@ -257,7 +306,10 @@
     const rect = scrubberTrackEl.getBoundingClientRect();
     const clampedY = Math.max(0, Math.min(rect.height, clientY - rect.top));
     const ratio = clampedY / rect.height;
-    const index = Math.min(posts.length - 1, Math.max(0, Math.round(ratio * (posts.length - 1))));
+    const index = Math.min(
+      posts.length - 1,
+      Math.max(0, Math.round(ratio * (posts.length - 1))),
+    );
     if (posts[index]) {
       focusPost(posts[index], "auto");
     }
@@ -265,8 +317,15 @@
 
   function focusPost(post: Post, behavior: ScrollBehavior = "smooth"): void {
     focusedPostId = post.id;
-    const slide = document.querySelector(`[data-post-id="${post.id}"]`);
-    slide?.scrollIntoView({ behavior, inline: "center", block: "nearest" });
+    focusLock = true;
+    ensureVisible(post.id);
+    // Wait a tick so a newly-revealed slide (pagination just grew) exists
+    // in the DOM before we try to scroll to it.
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-post-id="${post.id}"]`)
+        ?.scrollIntoView({ behavior, inline: "center", block: "nearest" });
+    });
   }
 
   function openPost(post: Post): void {
@@ -307,9 +366,12 @@
     activeTab = newTab;
 
     if (newTab === "timeline") {
+      if (focusedPostId) ensureVisible(focusedPostId);
       requestAnimationFrame(() => {
         if (focusedPostId) {
-          const el = document.querySelector(`.stl-card[data-post-id="${focusedPostId}"]`);
+          const el = document.querySelector(
+            `.stl-card[data-post-id="${focusedPostId}"]`,
+          );
           if (el) {
             el.scrollIntoView({ behavior: "instant", block: "center" });
             return;
@@ -320,6 +382,7 @@
         }
       });
     } else if (newTab === "map") {
+      ensureVisible(focusedPostId);
       requestAnimationFrame(() => {
         if (focusedPostId) {
           const post = posts.find((p) => p.id === focusedPostId);
@@ -365,8 +428,21 @@
     <span class="logo logo-lg">Moments</span>
     <div class="topbar-right">
       {#if countText}<span class="count">{countText}</span>{/if}
-      <a href="/customize" class="icon-btn add-btn" aria-label="Create new post" title="New post">
-        <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+      <a
+        href="/customize"
+        class="icon-btn add-btn"
+        aria-label="Create new post"
+        title="New post"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          width="18"
+          height="18"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+        >
           <path d="M8 3v10M3 8h10" />
         </svg>
       </a>
@@ -388,7 +464,16 @@
           onclick={() => (showScrubber = !showScrubber)}
           class="menu-toggle-item"
         >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <line x1="4" y1="21" x2="4" y2="14"></line>
             <line x1="4" y1="10" x2="4" y2="3"></line>
             <line x1="12" y1="21" x2="12" y2="12"></line>
@@ -400,20 +485,33 @@
             <line x1="17" y1="16" x2="23" y2="16"></line>
           </svg>
           <span style="flex:1;">Timeline slider</span>
-          <span class="menu-pill" class:pill-active={showScrubber}>{showScrubber ? "ON" : "OFF"}</span>
+          <span class="menu-pill" class:pill-active={showScrubber}
+            >{showScrubber ? "ON" : "OFF"}</span
+          >
         </button>
 
         <button
           onclick={() => (showConnectors = !showConnectors)}
           class="menu-toggle-item"
         >
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <circle cx="6" cy="18" r="3"></circle>
             <circle cx="18" cy="6" r="3"></circle>
             <path d="M8.5 15.5l7-7"></path>
           </svg>
           <span style="flex:1;">Route lines</span>
-          <span class="menu-pill" class:pill-active={showConnectors}>{showConnectors ? "ON" : "OFF"}</span>
+          <span class="menu-pill" class:pill-active={showConnectors}
+            >{showConnectors ? "ON" : "OFF"}</span
+          >
         </button>
 
         <div class="menu-divider"></div>
@@ -423,7 +521,15 @@
           popovertargetaction="hide"
           onclick={() => load()}
         >
-          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+          <svg
+            viewBox="0 0 16 16"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
             ><path d="M2 8a6 6 0 1 0 1.5-3.9M2 3.5V8h4.5" /></svg
           >
           Fetch
@@ -437,8 +543,18 @@
             location.reload();
           }}
         >
-          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            ><path d="M8 2v3l3-3M2 8a6 6 0 0 0 10.3 4.2M14 8a6 6 0 0 0-10.3-4.2" /></svg
+          <svg
+            viewBox="0 0 16 16"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path
+              d="M8 2v3l3-3M2 8a6 6 0 0 0 10.3 4.2M14 8a6 6 0 0 0-10.3-4.2"
+            /></svg
           >
           Update
         </button>
@@ -447,8 +563,18 @@
           popovertargetaction="hide"
           onclick={openTrash}
         >
-          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            ><path d="M2.5 3.5h11M5.5 3.5v-1a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1m-7 0v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-10M6.5 6.5v5m3-5v5" /></svg
+          <svg
+            viewBox="0 0 16 16"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path
+              d="M2.5 3.5h11M5.5 3.5v-1a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1m-7 0v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-10M6.5 6.5v5m3-5v5"
+            /></svg
           >
           Trash
         </button>
@@ -458,8 +584,18 @@
           onclick={signOutAndReset}
           style="color: var(--danger);"
         >
-          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            ><path d="M10 3.5h2.5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H10M6 5.5L3.5 8 6 10.5M14 8H3.5" /></svg
+          <svg
+            viewBox="0 0 16 16"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path
+              d="M10 3.5h2.5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H10M6 5.5L3.5 8 6 10.5M14 8H3.5"
+            /></svg
           >
           Sign out
         </button>
@@ -478,10 +614,20 @@
         onclick={() => switchTab("timeline")}
         id="tab-timeline"
       >
-        <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="2" y="3" width="16" height="5" rx="1.5"/>
-          <rect x="2" y="10.5" width="10" height="3.5" rx="1.5"/>
-          <rect x="2" y="16" width="7" height="2" rx="1"/>
+        <svg
+          viewBox="0 0 20 20"
+          width="13"
+          height="13"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.7"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="2" y="3" width="16" height="5" rx="1.5" />
+          <rect x="2" y="10.5" width="10" height="3.5" rx="1.5" />
+          <rect x="2" y="16" width="7" height="2" rx="1" />
         </svg>
         Timeline
       </button>
@@ -493,10 +639,20 @@
         onclick={() => switchTab("map")}
         id="tab-map"
       >
-        <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polygon points="2 5 7 2.5 13 5 18 2.5 18 15.5 13 18 7 15.5 2 18"/>
-          <line x1="7" y1="2.5" x2="7" y2="15.5"/>
-          <line x1="13" y1="5" x2="13" y2="18"/>
+        <svg
+          viewBox="0 0 20 20"
+          width="13"
+          height="13"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.7"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <polygon points="2 5 7 2.5 13 5 18 2.5 18 15.5 13 18 7 15.5 2 18" />
+          <line x1="7" y1="2.5" x2="7" y2="15.5" />
+          <line x1="13" y1="5" x2="13" y2="18" />
         </svg>
         Map
       </button>
@@ -506,44 +662,90 @@
   <main class:timeline-main={activeTab === "timeline"}>
     {#if loading}
       {#if activeTab === "timeline"}
-        <div class="stl-feed" style="max-width: 600px; margin: 0 auto; width: 100%;" role="status" aria-label="Loading timeline">
+        <div
+          class="stl-feed"
+          style="max-width: 600px; margin: 0 auto; width: 100%;"
+          role="status"
+          aria-label="Loading timeline"
+        >
           {#each [0, 1, 2] as n (n)}
             <article class="skel-timeline-card">
               <header class="skel-timeline-head">
                 <div class="skel-media skel-avatar"></div>
-                <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
-                  <div class="skel-line" style="width: 110px; height: 13px;"></div>
-                  <div class="skel-line" style="width: 80px; height: 10px;"></div>
+                <div
+                  style="display: flex; flex-direction: column; gap: 4px; flex: 1;"
+                >
+                  <div
+                    class="skel-line"
+                    style="width: 110px; height: 13px;"
+                  ></div>
+                  <div
+                    class="skel-line"
+                    style="width: 80px; height: 10px;"
+                  ></div>
                 </div>
                 <div class="skel-line" style="width: 45px; height: 10px;"></div>
               </header>
-              <div class="skel-media" style="width: 100%; aspect-ratio: 1 / 1; border-radius: 0;"></div>
-              <div style="padding: 12px 16px 4px; display: flex; flex-direction: column; gap: 6px;">
+              <div
+                class="skel-media"
+                style="width: 100%; aspect-ratio: 1 / 1; border-radius: 0;"
+              ></div>
+              <div
+                style="padding: 12px 16px 4px; display: flex; flex-direction: column; gap: 6px;"
+              >
                 <div class="skel-line" style="width: 80%; height: 12px;"></div>
                 <div class="skel-line" style="width: 50%; height: 12px;"></div>
               </div>
               <div style="padding: 10px 16px 14px; display: flex; gap: 18px;">
-                <div class="skel-line" style="width: 24px; height: 24px; border-radius: 50%;"></div>
-                <div class="skel-line" style="width: 24px; height: 24px; border-radius: 50%;"></div>
+                <div
+                  class="skel-line"
+                  style="width: 24px; height: 24px; border-radius: 50%;"
+                ></div>
+                <div
+                  class="skel-line"
+                  style="width: 24px; height: 24px; border-radius: 50%;"
+                ></div>
               </div>
             </article>
           {/each}
         </div>
       {:else}
-        <div class="snap-feed-wrapper" role="status" aria-label="Loading moments">
+        <div
+          class="snap-feed-wrapper"
+          role="status"
+          aria-label="Loading moments"
+        >
           <div class="snap-feed" style="overflow-x: hidden;">
             {#each [0, 1, 2] as n (n)}
               <div class="snap-slide">
                 <div class="skel-hud">
                   <div class="hud-top">
-                    <div class="skel-line" style="width: 70px; height: 16px; border-radius: 12px;"></div>
-                    <div class="skel-line" style="width: 50px; height: 14px;"></div>
+                    <div
+                      class="skel-line"
+                      style="width: 70px; height: 16px; border-radius: 12px;"
+                    ></div>
+                    <div
+                      class="skel-line"
+                      style="width: 50px; height: 14px;"
+                    ></div>
                   </div>
-                  <div class="skel-line" style="width: 85%; height: 14px; margin-top: 4px;"></div>
-                  <div class="skel-line" style="width: 60%; height: 14px;"></div>
+                  <div
+                    class="skel-line"
+                    style="width: 85%; height: 14px; margin-top: 4px;"
+                  ></div>
+                  <div
+                    class="skel-line"
+                    style="width: 60%; height: 14px;"
+                  ></div>
                   <div class="hud-bottom" style="margin-top: 6px;">
-                    <div class="skel-line" style="width: 80px; height: 12px;"></div>
-                    <div class="skel-line" style="width: 24px; height: 24px; border-radius: 50%;"></div>
+                    <div
+                      class="skel-line"
+                      style="width: 80px; height: 12px;"
+                    ></div>
+                    <div
+                      class="skel-line"
+                      style="width: 24px; height: 24px; border-radius: 50%;"
+                    ></div>
                   </div>
                 </div>
               </div>
@@ -561,151 +763,167 @@
     {:else if posts.length === 0}
       <div class="state show">
         <h2>Nothing here yet</h2>
-        <p>Share a photo or video from your gallery — it&rsquo;ll land right here.</p>
+        <p>
+          Share a photo or video from your gallery — it&rsquo;ll land right
+          here.
+        </p>
       </div>
-    {:else}
-      {#if activeTab === "map"}
-        <!-- Left side vertical scrubber slider -->
-        {#if showScrubber && posts.length > 1}
-          <aside
-            class="timeline-scrubber-wrapper"
-            class:active={scrubberActive}
-            aria-label="Timeline Scrubber"
+    {:else if activeTab === "map"}
+      <!-- Left side vertical scrubber slider -->
+      {#if showScrubber && posts.length > 1}
+        <aside
+          class="timeline-scrubber-wrapper"
+          class:active={scrubberActive}
+          aria-label="Timeline Scrubber"
+        >
+          <div
+            class="scrubber-capsule"
+            bind:this={scrubberTrackEl}
+            role="slider"
+            tabindex="0"
+            aria-valuemin="0"
+            aria-valuemax={posts.length - 1}
+            aria-valuenow={focusedIndex}
+            aria-valuetext={`Moment ${focusedIndex + 1} of ${posts.length}`}
+            ontouchstart={(e) => {
+              scrubberActive = true;
+              handleScrubberTouch(e.touches[0].clientY);
+            }}
+            ontouchmove={(e) => {
+              if (scrubberActive) handleScrubberTouch(e.touches[0].clientY);
+            }}
+            ontouchend={() => (scrubberActive = false)}
+            onmousedown={(e) => {
+              scrubberActive = true;
+              handleScrubberTouch(e.clientY);
+              const onMove = (ev: MouseEvent) =>
+                handleScrubberTouch(ev.clientY);
+              const onUp = () => {
+                scrubberActive = false;
+                window.removeEventListener("mousemove", onMove);
+                window.removeEventListener("mouseup", onUp);
+              };
+              window.addEventListener("mousemove", onMove);
+              window.addEventListener("mouseup", onUp);
+            }}
           >
-            <div
-              class="scrubber-capsule"
-              bind:this={scrubberTrackEl}
-              role="slider"
-              tabindex="0"
-              aria-valuemin="0"
-              aria-valuemax={posts.length - 1}
-              aria-valuenow={focusedIndex}
-              aria-valuetext={`Moment ${focusedIndex + 1} of ${posts.length}`}
-              ontouchstart={(e) => {
-                scrubberActive = true;
-                handleScrubberTouch(e.touches[0].clientY);
-              }}
-              ontouchmove={(e) => {
-                if (scrubberActive) handleScrubberTouch(e.touches[0].clientY);
-              }}
-              ontouchend={() => (scrubberActive = false)}
-              onmousedown={(e) => {
-                scrubberActive = true;
-                handleScrubberTouch(e.clientY);
-                const onMove = (ev: MouseEvent) => handleScrubberTouch(ev.clientY);
-                const onUp = () => {
-                  scrubberActive = false;
-                  window.removeEventListener("mousemove", onMove);
-                  window.removeEventListener("mouseup", onUp);
-                };
-                window.addEventListener("mousemove", onMove);
-                window.addEventListener("mouseup", onUp);
-              }}
-            >
-              <!-- Notch ticks inside capsule -->
-              <div class="scrubber-ticks" aria-hidden="true">
-                <span class="scrubber-tick major"></span>
-                <span class="scrubber-tick"></span>
-                <span class="scrubber-tick"></span>
-                <span class="scrubber-tick major"></span>
-                <span class="scrubber-tick"></span>
-                <span class="scrubber-tick"></span>
-                <span class="scrubber-tick major"></span>
-              </div>
+            <!-- Notch ticks inside capsule -->
+            <div class="scrubber-ticks" aria-hidden="true">
+              <span class="scrubber-tick major"></span>
+              <span class="scrubber-tick"></span>
+              <span class="scrubber-tick"></span>
+              <span class="scrubber-tick major"></span>
+              <span class="scrubber-tick"></span>
+              <span class="scrubber-tick"></span>
+              <span class="scrubber-tick major"></span>
+            </div>
 
-              <div class="scrubber-track">
-                <div class="scrubber-progress" style="height: {scrubberPercent}%;"></div>
-              </div>
-
+            <div class="scrubber-track">
               <div
-                class="scrubber-thumb"
-                style="top: {scrubberPercent}%;"
-              >
-                <span class="scrubber-thumb-dot"></span>
-                <div class="scrubber-bubble">
-                  <span class="bubble-num">{focusedIndex + 1}</span>
-                  <span class="bubble-total">/{posts.length}</span>
-                  {#if posts[focusedIndex]}
-                    <span class="bubble-date">{formatDate(posts[focusedIndex].created_at)}</span>
-                  {/if}
-                </div>
+                class="scrubber-progress"
+                style="height: {scrubberPercent}%;"
+              ></div>
+            </div>
+
+            <div class="scrubber-thumb" style="top: {scrubberPercent}%;">
+              <span class="scrubber-thumb-dot"></span>
+              <div class="scrubber-bubble">
+                <span class="bubble-num">{focusedIndex + 1}</span>
+                <span class="bubble-total">/{posts.length}</span>
+                {#if posts[focusedIndex]}
+                  <span class="bubble-date"
+                    >{formatDate(posts[focusedIndex].created_at)}</span
+                  >
+                {/if}
               </div>
             </div>
-          </aside>
-        {/if}
+          </div>
+        </aside>
+      {/if}
 
-        <div class="snap-feed-wrapper">
-          <div class="snap-feed" use:setupObserver={visiblePosts}>
-            {#each visiblePosts as post (post.id)}
-              <section
-                class="snap-slide"
-                data-post-id={post.id}
+      <div class="snap-feed-wrapper">
+        <div class="snap-feed" use:setupObserver={visiblePosts}>
+          {#each visiblePosts as post (post.id)}
+            <section class="snap-slide" data-post-id={post.id}>
+              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+              <div
+                class="slide-hud"
+                class:focused={post.id === focusedPostId}
+                onclick={() => openPost(post)}
+                role="button"
+                tabindex="0"
               >
-                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-                <div
-                  class="slide-hud"
-                  class:focused={post.id === focusedPostId}
-                  onclick={() => openPost(post)}
-                  role="button"
-                  tabindex="0"
-                >
-                  <div class="hud-top">
-                    <div class="hud-candy-badge">
-                      <span class="hud-candy-dot"></span>
-                      {#if (post.post_media?.length || 0) > 0}
-                        <span>{post.post_media.length} {post.post_media.length === 1 ? 'item' : 'items'}</span>
-                      {/if}
-                    </div>
-                    <span class="hud-time">
-                      {new Date(post.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                    </span>
+                <div class="hud-top">
+                  <div class="hud-candy-badge">
+                    <span class="hud-candy-dot"></span>
+                    {#if (post.post_media?.length || 0) > 0}
+                      <span
+                        >{post.post_media.length}
+                        {post.post_media.length === 1 ? "item" : "items"}</span
+                      >
+                    {/if}
                   </div>
+                  <span class="hud-time">
+                    {new Date(post.created_at).toLocaleTimeString([], {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
 
-                  {#if post.caption}
-                    <p class="hud-caption">
-                      {post.caption.length > 150 ? post.caption.slice(0, 150) + "…" : post.caption}
-                    </p>
-                  {/if}
+                {#if post.caption}
+                  <p class="hud-caption">
+                    {post.caption.length > 150
+                      ? post.caption.slice(0, 150) + "…"
+                      : post.caption}
+                  </p>
+                {/if}
 
-                  <div class="hud-bottom">
-                    <time class="hud-date" datetime={post.created_at}>
-                      {formatDate(post.created_at)}
-                    </time>
-                    <div class="hud-tap-pill">
-                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
-                        <path d="M6 3.5l4.5 4.5-4.5 4.5" />
-                      </svg>
-                    </div>
+                <div class="hud-bottom">
+                  <time class="hud-date" datetime={post.created_at}>
+                    {formatDate(post.created_at)}
+                  </time>
+                  <div class="hud-tap-pill">
+                    <svg
+                      viewBox="0 0 16 16"
+                      width="14"
+                      height="14"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                    >
+                      <path d="M6 3.5l4.5 4.5-4.5 4.5" />
+                    </svg>
                   </div>
                 </div>
-              </section>
-            {/each}
-            {#if hasMore}
-              <!-- Sentinel: scrolling to this triggers loading the next page of map slides -->
-              <div
-                class="snap-slide snap-sentinel"
-                use:setupSentinel
-              ></div>
-            {/if}
-          </div>
+              </div>
+            </section>
+          {/each}
+          {#if hasMore}
+            <!-- Sentinel: scrolling to this triggers loading the next page of map slides -->
+            <div class="snap-slide snap-sentinel" use:setupSentinel></div>
+          {/if}
         </div>
-      {:else}
-        <!-- Social timeline view -->
-        <SocialTimeline
-          posts={visiblePosts}
-          focusedPostId={focusedPostId}
-          onOpenPost={openPost}
-          onShowOnMap={handleShowOnMap}
-          onFocusPost={(id) => (focusedPostId = id)}
-        />
-        {#if hasMore}
-          <!-- Sentinel: when this enters the viewport the next batch of cards is revealed -->
-          <div class="load-more-sentinel" use:setupSentinel aria-hidden="true"></div>
-        {/if}
+      </div>
+    {:else}
+      <!-- Social timeline view -->
+      <SocialTimeline
+        posts={visiblePosts}
+        {focusedPostId}
+        onOpenPost={openPost}
+        onShowOnMap={handleShowOnMap}
+        onFocusPost={(id) => (focusedPostId = id)}
+      />
+      {#if hasMore}
+        <!-- Sentinel: when this enters the viewport the next batch of cards is revealed -->
+        <div
+          class="load-more-sentinel"
+          use:setupSentinel
+          aria-hidden="true"
+        ></div>
       {/if}
     {/if}
   </main>
-
 
   {#if activePost}
     <PostViewer
@@ -720,16 +938,32 @@
 
   <!-- ---- Trash Overlay ---- -->
   {#if showTrash}
-    <div class="trash-overlay" role="dialog" aria-modal="true" aria-label="Trash">
+    <div
+      class="trash-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Trash"
+    >
       <header class="trash-header">
         <button class="icon-btn" onclick={closeTrash} aria-label="Close trash">
-          <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <svg
+            viewBox="0 0 16 16"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+          >
             <path d="M10 3L5 8l5 5" />
           </svg>
         </button>
         <span class="logo" style="font-size:1.1rem;">Trash</span>
-        <span class="count" style="visibility: {trashPosts.length ? 'visible' : 'hidden'}">
-          {trashPosts.length} item{trashPosts.length !== 1 ? 's' : ''}
+        <span
+          class="count"
+          style="visibility: {trashPosts.length ? 'visible' : 'hidden'}"
+        >
+          {trashPosts.length} item{trashPosts.length !== 1 ? "s" : ""}
         </span>
       </header>
 
@@ -745,46 +979,94 @@
           </div>
         {:else if trashPosts.length === 0}
           <div class="state show" style="min-height: 50vh;">
-            <svg viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.3">
-              <path d="M6 12h36M18 12V8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4M20 22v12m8-12v12" />
+            <svg
+              viewBox="0 0 48 48"
+              width="48"
+              height="48"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              style="opacity:.3"
+            >
+              <path
+                d="M6 12h36M18 12V8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4M20 22v12m8-12v12"
+              />
               <rect x="10" y="12" width="28" height="30" rx="3" />
             </svg>
             <h2>Trash is empty</h2>
-            <p style="color: var(--muted); font-size:.9rem;">Deleted moments will appear here.</p>
+            <p style="color: var(--muted); font-size:.9rem;">
+              Deleted moments will appear here.
+            </p>
           </div>
         {:else}
-          <p class="trash-hint">Items in trash can be restored or permanently deleted to free up storage.</p>
+          <p class="trash-hint">
+            Items in trash can be restored or permanently deleted to free up
+            storage.
+          </p>
           <ul class="trash-list">
             {#each trashPosts as post (post.id)}
-              <li class="trash-card" class:confirming={confirmPurgeId === post.id}>
+              <li
+                class="trash-card"
+                class:confirming={confirmPurgeId === post.id}
+              >
                 {#if (post.post_media?.length ?? 0) > 0}
                   <div class="trash-thumb-strip">
                     {#each post.post_media.slice(0, 3) as m}
-                      {#if m.mime_type.startsWith('video')}
+                      {#if m.mime_type.startsWith("video")}
                         <div class="trash-thumb trash-thumb-video">
-                          <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" style="opacity:.7"><path d="M6 4l7 4-7 4V4z"/></svg>
+                          <svg
+                            viewBox="0 0 16 16"
+                            width="20"
+                            height="20"
+                            fill="currentColor"
+                            style="opacity:.7"><path d="M6 4l7 4-7 4V4z" /></svg
+                          >
                         </div>
                       {:else}
-                        <img class="trash-thumb" src={m.url} alt="" loading="lazy" />
+                        <img
+                          class="trash-thumb"
+                          src={m.url}
+                          alt=""
+                          loading="lazy"
+                        />
                       {/if}
                     {/each}
                     {#if post.post_media.length > 3}
-                      <div class="trash-thumb trash-thumb-more">+{post.post_media.length - 3}</div>
+                      <div class="trash-thumb trash-thumb-more">
+                        +{post.post_media.length - 3}
+                      </div>
                     {/if}
                   </div>
                 {/if}
 
                 <div class="trash-info">
                   {#if post.caption}
-                    <p class="trash-caption">{post.caption.length > 120 ? post.caption.slice(0,120) + '…' : post.caption}</p>
+                    <p class="trash-caption">
+                      {post.caption.length > 120
+                        ? post.caption.slice(0, 120) + "…"
+                        : post.caption}
+                    </p>
                   {/if}
                   <time class="trash-date" datetime={post.created_at}>
                     {formatDateTime(post.created_at)}
                   </time>
                   {#if post.location}
                     <span class="trash-location">
-                      <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" style="opacity:.5;flex-shrink:0"><path d="M8 1a4.5 4.5 0 0 0-4.5 4.5C3.5 9 8 15 8 15s4.5-6 4.5-9.5A4.5 4.5 0 0 0 8 1zm0 6a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/></svg>
-                      {post.location.length > 60 ? post.location.slice(0,60)+'…' : post.location}
+                      <svg
+                        viewBox="0 0 16 16"
+                        width="11"
+                        height="11"
+                        fill="currentColor"
+                        style="opacity:.5;flex-shrink:0"
+                        ><path
+                          d="M8 1a4.5 4.5 0 0 0-4.5 4.5C3.5 9 8 15 8 15s4.5-6 4.5-9.5A4.5 4.5 0 0 0 8 1zm0 6a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"
+                        /></svg
+                      >
+                      {post.location.length > 60
+                        ? post.location.slice(0, 60) + "…"
+                        : post.location}
                     </span>
                   {/if}
                 </div>
@@ -798,7 +1080,16 @@
                     {#if restoringId === post.id}
                       <span class="spinner-sm"></span>
                     {:else}
-                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 8a6 6 0 1 0 1.5-3.9M2 3.5V8h4.5"/></svg>
+                      <svg
+                        viewBox="0 0 16 16"
+                        width="14"
+                        height="14"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        ><path d="M2 8a6 6 0 1 0 1.5-3.9M2 3.5V8h4.5" /></svg
+                      >
                     {/if}
                     Restore
                   </button>
@@ -811,10 +1102,31 @@
                     {#if purgingId === post.id}
                       <span class="spinner-sm"></span>
                     {:else if confirmPurgeId === post.id}
-                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 8h12M8 2l6 6-6 6"/></svg>
+                      <svg
+                        viewBox="0 0 16 16"
+                        width="14"
+                        height="14"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        ><path d="M2 8h12M8 2l6 6-6 6" /></svg
+                      >
                       Confirm delete
                     {:else}
-                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11M5.5 3.5v-1a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1m-7 0v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-10"/></svg>
+                      <svg
+                        viewBox="0 0 16 16"
+                        width="14"
+                        height="14"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        ><path
+                          d="M2.5 3.5h11M5.5 3.5v-1a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1m-7 0v10a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-10"
+                        /></svg
+                      >
                       Delete forever
                     {/if}
                   </button>

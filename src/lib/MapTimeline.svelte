@@ -267,7 +267,7 @@
           "circle-stroke-width": 1,
           "circle-stroke-color": "rgba(217, 160, 102, 0.35)",
         },
-      });
+      } as maplibregl.LayerSpecification);
 
       map.addLayer({
         id: "posts-active",
@@ -281,7 +281,7 @@
           "circle-stroke-width": 2,
           "circle-stroke-color": "#d9a066",
         },
-      });
+      } as maplibregl.LayerSpecification);
 
       map.on("click", "posts-points", (e) => {
         const id = e.features?.[0]?.properties?.id as string | undefined;

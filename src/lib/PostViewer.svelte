@@ -140,7 +140,7 @@
     }
   }
 
-  function getCoverScale(img: HTMLImageElement | null, container: HTMLElement | null): number {
+  function getCoverScale(img: HTMLImageElement | null, container: HTMLElement | null | undefined): number {
     if (!img || !container || !img.naturalWidth || !img.naturalHeight) return 1;
     const cw = container.clientWidth;
     const ch = container.clientHeight;
@@ -575,12 +575,13 @@
                   src={m.url}
                   alt={post.caption || ""}
                   onload={(e) => {
-                    const slide = e.currentTarget.closest('.slide') as HTMLElement | null;
-                    if (slide && !fitMode) {
-                      const s = getCoverScale(e.currentTarget, slide);
-                      e.currentTarget.style.transform = `scale(${s.toFixed(4)})`;
-                    }
-                  }}
+  const img = e.currentTarget as HTMLImageElement;
+  const slide = img.closest('.slide') as HTMLElement | null;
+  if (slide && !fitMode) {
+    const s = getCoverScale(img, slide);
+    img.style.transform = `scale(${s.toFixed(4)})`;
+  }
+}}
                 />
               {/if}
             </div>
