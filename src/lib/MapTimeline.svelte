@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as maplibregl from "maplibre-gl";
   import "maplibre-gl/dist/maplibre-gl.css";
-  import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
+  import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
   import type { FeatureCollection } from "geojson";
   import type { Post } from "$lib/api";
 
