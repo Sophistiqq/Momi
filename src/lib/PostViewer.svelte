@@ -177,6 +177,8 @@
     el.style.transformOrigin = "";
   }
 
+  let heartBurstTimer: ReturnType<typeof setTimeout> | null = null;
+
   async function handleToggleLike(): Promise<void> {
     if (liking) return;
     liking = true;
@@ -188,9 +190,7 @@
     post.liked_by_me = nextLiked;
     post.like_count = nextCount;
 
-    if (nextLiked) {
-      triggerHeartBurst();
-    }
+    triggerHeartBurst();
 
     try {
       const res = await apiToggleLike(post.id);
@@ -210,16 +210,21 @@
   }
 
   function triggerHeartBurst() {
-    heartBurst = true;
-    setTimeout(() => {
-      heartBurst = false;
-    }, 650);
+    heartBurst = false;
+    if (heartBurstTimer) clearTimeout(heartBurstTimer);
+    requestAnimationFrame(() => {
+      heartBurst = true;
+      heartBurstTimer = setTimeout(() => {
+        heartBurst = false;
+      }, 650);
+    });
   }
 
   function handleDoubleTapLike() {
-    triggerHeartBurst();
     if (!isLiked) {
       handleToggleLike();
+    } else {
+      triggerHeartBurst();
     }
   }
 
