@@ -260,6 +260,7 @@
         type: "circle",
         source: "posts",
         filter: ["==", ["get", "id"], ""],
+        interactive: false,
         paint: {
           "circle-radius": 12,
           "circle-color": "rgba(255, 255, 255, 0.15)",
@@ -273,6 +274,7 @@
         type: "circle",
         source: "posts",
         filter: ["==", ["get", "id"], ""],
+        interactive: false,
         paint: {
           "circle-radius": 9,
           "circle-color": "#ffffff",
