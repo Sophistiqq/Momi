@@ -1,6 +1,7 @@
 <script lang="ts">
   import * as maplibregl from "maplibre-gl";
   import "maplibre-gl/dist/maplibre-gl.css";
+  import type { FeatureCollection } from "geojson";
   import type { Post } from "$lib/api";
 
   interface Props {
@@ -38,6 +39,33 @@
     ],
   };
 
+  const emptyFC: GeoJSON.FeatureCollection = {
+    type: "FeatureCollection",
+    features: [],
+  };
+
+  function pointFeature(id: string, lng: number, lat: number) {
+    return {
+      type: "Feature" as const,
+      properties: { id },
+      geometry: { type: "Point" as const, coordinates: [lng, lat] },
+    };
+  }
+
+  function lineFeature(kind: string, a: Post, b: Post) {
+    return {
+      type: "Feature" as const,
+      properties: { kind },
+      geometry: {
+        type: "LineString" as const,
+        coordinates: [
+          [Number(a.lng), Number(a.lat)],
+          [Number(b.lng), Number(b.lat)],
+        ],
+      },
+    };
+  }
+
   interface MapParams {
     posts: Post[];
     activePostId: string | null;
@@ -50,27 +78,9 @@
     let currentActiveId = params.activePostId;
     let currentShowConnectors = params.showConnectors;
     let selectCallback = params.onSelectPost;
-    let markers: { id: string; marker: maplibregl.Marker; el: HTMLElement }[] = [];
     let isMapLoaded = false;
     let hasPositioned = false;
-
-    // Create SVG overlay for guaranteed 100% connector line rendering
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("class", "map-connectors-svg");
-
-    const pathPrev = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    pathPrev.setAttribute("class", "connector-prev");
-
-    const pathNextGlow = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    pathNextGlow.setAttribute("class", "connector-next-glow");
-
-    const pathNext = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    pathNext.setAttribute("class", "connector-next");
-
-    svg.appendChild(pathPrev);
-    svg.appendChild(pathNextGlow);
-    svg.appendChild(pathNext);
-    node.appendChild(svg);
+    let cursorPointer = false;
 
     const map = new maplibregl.Map({
       container: node,
@@ -79,15 +89,18 @@
       zoom: 2,
       interactive: true,
       attributionControl: false,
-      maxTileCacheSize: 250,
+      maxTileCacheSize: 50,
       fadeDuration: 100,
+      pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
     });
 
     function updateConnectors() {
-      if (!map || !currentShowConnectors) {
-        pathPrev.setAttribute("d", "");
-        pathNext.setAttribute("d", "");
-        pathNextGlow.setAttribute("d", "");
+      if (!map || !isMapLoaded) return;
+      const source = map.getSource("connectors");
+      if (!source) return;
+
+      if (!currentShowConnectors) {
+        (source as maplibregl.GeoJSONSource).setData(emptyFC);
         return;
       }
 
@@ -96,9 +109,7 @@
       );
 
       if (vp.length < 2) {
-        pathPrev.setAttribute("d", "");
-        pathNext.setAttribute("d", "");
-        pathNextGlow.setAttribute("d", "");
+        (source as maplibregl.GeoJSONSource).setData(emptyFC);
         return;
       }
 
@@ -106,42 +117,23 @@
       if (ai === -1) ai = 0;
 
       // vp is sorted created_at DESC: vp[0] is most recent, vp[last] is oldest.
-      let pPrev1: Post | null = null;
-      let pPrev2: Post | null = null;
-      let pNext1: Post | null = null;
-      let pNext2: Post | null = null;
+      const features: ReturnType<typeof lineFeature>[] = [];
 
       // Previous in time (from older moment to current) — subtle dashed connector
       if (ai + 1 < vp.length) {
-        pPrev1 = vp[ai + 1];
-        pPrev2 = vp[ai];
+        features.push(lineFeature("prev", vp[ai + 1], vp[ai]));
       }
 
       // Next in time (from current moment to newer moment) — prominent solid connector
       // For the most recent item (ai === 0), there is no next moment in the future.
       if (ai > 0) {
-        pNext1 = vp[ai];
-        pNext2 = vp[ai - 1];
+        features.push(lineFeature("next", vp[ai], vp[ai - 1]));
       }
 
-      if (pPrev1 && pPrev2) {
-        const pt1 = map.project([Number(pPrev1.lng), Number(pPrev1.lat)]);
-        const pt2 = map.project([Number(pPrev2.lng), Number(pPrev2.lat)]);
-        pathPrev.setAttribute("d", `M ${pt1.x} ${pt1.y} L ${pt2.x} ${pt2.y}`);
-      } else {
-        pathPrev.setAttribute("d", "");
-      }
-
-      if (pNext1 && pNext2) {
-        const pt1 = map.project([Number(pNext1.lng), Number(pNext1.lat)]);
-        const pt2 = map.project([Number(pNext2.lng), Number(pNext2.lat)]);
-        const d = `M ${pt1.x} ${pt1.y} L ${pt2.x} ${pt2.y}`;
-        pathNext.setAttribute("d", d);
-        pathNextGlow.setAttribute("d", d);
-      } else {
-        pathNext.setAttribute("d", "");
-        pathNextGlow.setAttribute("d", "");
-      }
+      (source as maplibregl.GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features,
+      });
     }
 
     let cameraTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -154,13 +146,13 @@
         if (!map) return;
         lastTargetId = targetId;
         if (!hasPositioned) {
-          map.jumpTo({ center: [targetLng, targetLat], zoom: 14, pitch: 30 });
+          map.jumpTo({ center: [targetLng, targetLat], zoom: 14, pitch: 0 });
           hasPositioned = true;
         } else {
           map.flyTo({
             center: [targetLng, targetLat],
             zoom: 14,
-            pitch: 30,
+            pitch: 0,
             speed: 0.8,
             curve: 1.2,
             essential: true,
@@ -170,51 +162,24 @@
     }
 
     function sync() {
-      if (!map) return;
+      if (!map || !isMapLoaded) return;
 
       const vp = currentPosts.filter(
         (p) => p.lat != null && p.lng != null && !(Number(p.lat) === 0 && Number(p.lng) === 0),
       );
 
-      // If post list IDs changed, rebuild markers; otherwise only update active class
-      const currentIds = currentPosts.map((p) => p.id).join(",");
-      const existingIds = markers.map((m) => m.id).join(",");
+      // All points in one GeoJSON source — rendered on the GPU, no DOM nodes.
+      (map.getSource("posts") as maplibregl.GeoJSONSource).setData({
+        type: "FeatureCollection",
+        features: vp.map((p) =>
+          pointFeature(p.id, Number(p.lng), Number(p.lat)),
+        ),
+      });
 
-      if (currentIds !== existingIds) {
-        markers.forEach((m) => m.marker.remove());
-        markers = [];
-
-        currentPosts.forEach((post) => {
-          if (post.lat == null || post.lng == null) return;
-          const lat = Number(post.lat);
-          const lng = Number(post.lng);
-          if (lat === 0 && lng === 0) return;
-
-          const el = document.createElement("div");
-          el.className = "map-marker";
-          if (post.id === currentActiveId) el.classList.add("active");
-
-          el.addEventListener("click", (e) => {
-            e.stopPropagation();
-            selectCallback(post);
-          });
-
-          const marker = new maplibregl.Marker({ element: el })
-            .setLngLat([lng, lat])
-            .addTo(map);
-
-          markers.push({ id: post.id, marker, el });
-        });
-      } else {
-        // Fast path: just update active CSS class without touching the DOM tree
-        markers.forEach((m) => {
-          if (m.id === currentActiveId) {
-            m.el.classList.add("active");
-          } else {
-            m.el.classList.remove("active");
-          }
-        });
-      }
+      // Active highlight via cheap filter swap instead of per-marker DOM updates.
+      const activeFilter: maplibregl.FilterSpecification = ["==", ["get", "id"], currentActiveId ?? ""];
+      map.setFilter("posts-active", activeFilter);
+      map.setFilter("posts-active-halo", activeFilter);
 
       updateConnectors();
 
@@ -230,12 +195,112 @@
     }
 
     map.on("load", () => {
+      map.addSource("connectors", { type: "geojson", data: emptyFC });
+
+      map.addLayer({
+        id: "connector-prev",
+        type: "line",
+        source: "connectors",
+        filter: ["==", ["get", "kind"], "prev"],
+        layout: { "line-cap": "round" },
+        paint: {
+          "line-color": "#d9a066",
+          "line-width": 1.5,
+          "line-dasharray": [4, 4],
+          "line-opacity": 0.3,
+        },
+      });
+
+      // Glow without SVG blur: a wide, translucent stroke under the core line.
+      map.addLayer({
+        id: "connector-next-glow",
+        type: "line",
+        source: "connectors",
+        filter: ["==", ["get", "kind"], "next"],
+        layout: { "line-cap": "round" },
+        paint: {
+          "line-color": "#ffaa44",
+          "line-width": 7,
+          "line-opacity": 0.15,
+        },
+      });
+
+      map.addLayer({
+        id: "connector-next",
+        type: "line",
+        source: "connectors",
+        filter: ["==", ["get", "kind"], "next"],
+        layout: { "line-cap": "round" },
+        paint: {
+          "line-color": "#ffb366",
+          "line-width": 2.5,
+          "line-opacity": 0.8,
+        },
+      });
+
+      map.addSource("posts", { type: "geojson", data: emptyFC });
+
+      map.addLayer({
+        id: "posts-points",
+        type: "circle",
+        source: "posts",
+        paint: {
+          "circle-radius": 6.5,
+          "circle-color": "#d9a066",
+          "circle-stroke-width": 2.5,
+          "circle-stroke-color": "rgba(255, 255, 255, 0.85)",
+        },
+      });
+
+      map.addLayer({
+        id: "posts-active-halo",
+        type: "circle",
+        source: "posts",
+        filter: ["==", ["get", "id"], ""],
+        paint: {
+          "circle-radius": 15,
+          "circle-color": "rgba(255, 255, 255, 0.15)",
+          "circle-stroke-width": 1,
+          "circle-stroke-color": "rgba(217, 160, 102, 0.35)",
+        },
+      });
+
+      map.addLayer({
+        id: "posts-active",
+        type: "circle",
+        source: "posts",
+        filter: ["==", ["get", "id"], ""],
+        paint: {
+          "circle-radius": 11,
+          "circle-color": "#ffffff",
+          "circle-stroke-width": 2.5,
+          "circle-stroke-color": "#d9a066",
+        },
+      });
+
+      map.on("click", "posts-points", (e) => {
+        const id = e.features?.[0]?.properties?.id as string | undefined;
+        if (!id) return;
+        const post = currentPosts.find((p) => p.id === id);
+        if (post) selectCallback(post);
+      });
+
+      map.on("mousemove", "posts-points", () => {
+        if (!cursorPointer) {
+          cursorPointer = true;
+          map.getCanvas().style.cursor = "pointer";
+        }
+      });
+      map.on("mouseleave", "posts-points", () => {
+        if (cursorPointer) {
+          cursorPointer = false;
+          map.getCanvas().style.cursor = "";
+        }
+      });
+
       isMapLoaded = true;
       sync();
     });
-
-    map.on("move", updateConnectors);
-    map.on("resize", updateConnectors);
 
     return {
       update(newParams: MapParams) {
@@ -247,9 +312,6 @@
       },
       destroy() {
         if (cameraTimeout) clearTimeout(cameraTimeout);
-        markers.forEach((m) => m.marker.remove());
-        markers = [];
-        svg.remove();
         map.remove();
       },
     };
@@ -282,61 +344,5 @@
       rgba(9, 9, 11, 0.2) 0%,
       rgba(9, 9, 11, 0.72) 100%
     );
-  }
-
-  :global(.map-connectors-svg) {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: 1;
-  }
-  :global(.connector-prev) {
-    stroke: var(--accent, #d9a066);
-    stroke-width: 1.5px;
-    stroke-dasharray: 4 4;
-    stroke-linecap: round;
-    opacity: 0.3;
-  }
-  :global(.connector-next-glow) {
-    stroke: #ffaa44;
-    stroke-width: 5px;
-    stroke-linecap: round;
-    opacity: 0.15;
-    filter: blur(2px);
-  }
-  :global(.connector-next) {
-    stroke: #ffb366;
-    stroke-width: 2.5px;
-    stroke-linecap: round;
-    opacity: 0.8;
-  }
-
-  :global(.map-marker) {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent, #d9a066);
-    border: 2.5px solid rgba(255, 255, 255, 0.85);
-    box-shadow: 0 0 10px var(--accent, #d9a066), 0 2px 6px rgba(0, 0, 0, 0.6);
-    cursor: pointer;
-    transition:
-      transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1),
-      background 0.25s,
-      border-color 0.25s,
-      box-shadow 0.25s;
-    z-index: 2;
-  }
-  :global(.map-marker:hover) {
-    transform: scale(1.3);
-    box-shadow: 0 0 16px var(--accent, #d9a066), 0 3px 8px rgba(0, 0, 0, 0.8);
-  }
-  :global(.map-marker.active) {
-    transform: scale(1.8);
-    background: #ffffff;
-    border-color: var(--accent, #d9a066);
-    box-shadow: 0 0 20px #ffffff, 0 0 28px var(--accent, #d9a066);
-    z-index: 10;
   }
 </style>
