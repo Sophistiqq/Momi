@@ -111,6 +111,8 @@
         style: darkStyle,
         center: [pickerTempLng, pickerTempLat],
         zoom: lat != null ? 14 : 4,
+        maxTileCacheSize: 100,
+        fadeDuration: 100,
       });
 
       const el = document.createElement("div");

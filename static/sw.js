@@ -1,5 +1,6 @@
-const CACHE = 'moments-shell-v7'; // bump to invalidate every phone's cached shell
+const CACHE = 'moments-shell-v8'; // bump to invalidate every phone's cached shell
 const MEDIA_CACHE = 'moments-media';
+const TILE_CACHE = 'moments-tiles';
 const SHELL = ['/', '/manifest.json', '/style.css'];
 
 self.addEventListener('install', (event) => {
@@ -19,7 +20,7 @@ self.addEventListener('message', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE && k !== MEDIA_CACHE).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k !== CACHE && k !== MEDIA_CACHE && k !== TILE_CACHE).map((k) => caches.delete(k)))
     )
   );
   event.waitUntil(self.clients.claim());
@@ -95,6 +96,29 @@ self.addEventListener('fetch', (event) => {
           cache.put(event.request, network.clone());
         }
         return network;
+      })
+    );
+    return;
+  }
+
+  // Map tiles (Carto basemaps, OpenStreetMap): cache-first for ultra-smooth map navigation
+  const isTileRequest =
+    url.hostname.endsWith('basemaps.cartocdn.com') ||
+    url.hostname.endsWith('tile.openstreetmap.org');
+  if (isTileRequest) {
+    event.respondWith(
+      caches.open(TILE_CACHE).then(async (cache) => {
+        const cached = await cache.match(event.request);
+        if (cached) return cached;
+        try {
+          const network = await fetch(event.request);
+          if (network.ok && (network.status === 200 || network.status === 304)) {
+            cache.put(event.request, network.clone());
+          }
+          return network;
+        } catch {
+          return cached || new Response('', { status: 408, statusText: 'Request Timeout' });
+        }
       })
     );
     return;

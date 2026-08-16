@@ -79,6 +79,8 @@
       zoom: 2,
       interactive: true,
       attributionControl: false,
+      maxTileCacheSize: 250,
+      fadeDuration: 100,
     });
 
     function updateConnectors() {
@@ -143,11 +145,14 @@
     }
 
     let cameraTimeout: ReturnType<typeof setTimeout> | null = null;
+    let lastTargetId: string | null = null;
 
-    function queueCameraMove(targetLng: number, targetLat: number) {
+    function queueCameraMove(targetLng: number, targetLat: number, targetId: string) {
+      if (hasPositioned && lastTargetId === targetId) return;
       if (cameraTimeout) clearTimeout(cameraTimeout);
       cameraTimeout = setTimeout(() => {
         if (!map) return;
+        lastTargetId = targetId;
         if (!hasPositioned) {
           map.jumpTo({ center: [targetLng, targetLat], zoom: 14, pitch: 30 });
           hasPositioned = true;
@@ -161,7 +166,7 @@
             essential: true,
           });
         }
-      }, 120);
+      }, 100);
     }
 
     function sync() {
@@ -219,7 +224,7 @@
         const targetLng = Number(target.lng);
         const targetLat = Number(target.lat);
         if (targetLat !== 0 || targetLng !== 0) {
-          queueCameraMove(targetLng, targetLat);
+          queueCameraMove(targetLng, targetLat, target.id);
         }
       }
     }
