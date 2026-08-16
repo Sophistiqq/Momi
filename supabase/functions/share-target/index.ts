@@ -395,12 +395,20 @@ async function sendPushToUser(userId: string, title: string, body: string, url =
 async function handleList(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const statusParam = url.searchParams.get('status');
+  const limitParam = parseInt(url.searchParams.get('limit') || '30', 10);
+  const beforeParam = url.searchParams.get('before');
+
+  const pageSize = Math.min(Math.max(limitParam || 30, 1), 50);
 
   let query = supabase
     .from('posts')
     .select('id, caption, author, created_at, status, location, lat, lng, mentions, post_media(id, object_key, mime_type, sort_order)')
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(pageSize);
+
+  if (beforeParam) {
+    query = query.lt('created_at', beforeParam);
+  }
 
   if (statusParam === 'trash') {
     query = query.eq('status', 'trash');
@@ -418,7 +426,11 @@ async function handleList(req: Request): Promise<Response> {
       url: `https://wmouyojmcelxgkwjfpxz.supabase.co/storage/v1/object/public/moments/${m.object_key}`,
     })),
   }));
-  return Response.json(rows);
+  return Response.json(rows, {
+    headers: {
+      'Cache-Control': 'private, no-cache',
+    },
+  });
 }
 
 function renderPage(message: string, postId?: string, caption = ''): Response {

@@ -17,6 +17,9 @@ if (fs.existsSync('.dev.vars')) {
 
 export default defineConfig({
   plugins: [sveltekit()],
+  optimizeDeps: {
+    exclude: ['maplibre-gl'],
+  },
   server: {
     proxy: {
       '/share-target': {

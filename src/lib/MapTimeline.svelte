@@ -18,10 +18,10 @@
       "carto-dark": {
         type: "raster",
         tiles: [
-          "https://a.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png",
-          "https://b.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png",
-          "https://c.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png",
-          "https://d.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}@2x.png",
+          "https://a.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
+          "https://b.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
+          "https://c.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
+          "https://d.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png",
         ],
         tileSize: 256,
         attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
@@ -33,7 +33,7 @@
         type: "raster",
         source: "carto-dark",
         minzoom: 0,
-        maxzoom: 20,
+        maxzoom: 19,
       },
     ],
   };
@@ -142,6 +142,28 @@
       }
     }
 
+    let cameraTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    function queueCameraMove(targetLng: number, targetLat: number) {
+      if (cameraTimeout) clearTimeout(cameraTimeout);
+      cameraTimeout = setTimeout(() => {
+        if (!map) return;
+        if (!hasPositioned) {
+          map.jumpTo({ center: [targetLng, targetLat], zoom: 14, pitch: 30 });
+          hasPositioned = true;
+        } else {
+          map.flyTo({
+            center: [targetLng, targetLat],
+            zoom: 14,
+            pitch: 30,
+            speed: 0.8,
+            curve: 1.2,
+            essential: true,
+          });
+        }
+      }, 120);
+    }
+
     function sync() {
       if (!map) return;
 
@@ -149,31 +171,45 @@
         (p) => p.lat != null && p.lng != null && !(Number(p.lat) === 0 && Number(p.lng) === 0),
       );
 
-      // Rebuild markers
-      markers.forEach((m) => m.marker.remove());
-      markers = [];
+      // If post list IDs changed, rebuild markers; otherwise only update active class
+      const currentIds = currentPosts.map((p) => p.id).join(",");
+      const existingIds = markers.map((m) => m.id).join(",");
 
-      currentPosts.forEach((post) => {
-        if (post.lat == null || post.lng == null) return;
-        const lat = Number(post.lat);
-        const lng = Number(post.lng);
-        if (lat === 0 && lng === 0) return;
+      if (currentIds !== existingIds) {
+        markers.forEach((m) => m.marker.remove());
+        markers = [];
 
-        const el = document.createElement("div");
-        el.className = "map-marker";
-        if (post.id === currentActiveId) el.classList.add("active");
+        currentPosts.forEach((post) => {
+          if (post.lat == null || post.lng == null) return;
+          const lat = Number(post.lat);
+          const lng = Number(post.lng);
+          if (lat === 0 && lng === 0) return;
 
-        el.addEventListener("click", (e) => {
-          e.stopPropagation();
-          selectCallback(post);
+          const el = document.createElement("div");
+          el.className = "map-marker";
+          if (post.id === currentActiveId) el.classList.add("active");
+
+          el.addEventListener("click", (e) => {
+            e.stopPropagation();
+            selectCallback(post);
+          });
+
+          const marker = new maplibregl.Marker({ element: el })
+            .setLngLat([lng, lat])
+            .addTo(map);
+
+          markers.push({ id: post.id, marker, el });
         });
-
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([lng, lat])
-          .addTo(map);
-
-        markers.push({ id: post.id, marker, el });
-      });
+      } else {
+        // Fast path: just update active CSS class without touching the DOM tree
+        markers.forEach((m) => {
+          if (m.id === currentActiveId) {
+            m.el.classList.add("active");
+          } else {
+            m.el.classList.remove("active");
+          }
+        });
+      }
 
       updateConnectors();
 
@@ -183,19 +219,7 @@
         const targetLng = Number(target.lng);
         const targetLat = Number(target.lat);
         if (targetLat !== 0 || targetLng !== 0) {
-          if (!hasPositioned) {
-            map.jumpTo({ center: [targetLng, targetLat], zoom: 14, pitch: 30 });
-            hasPositioned = true;
-          } else {
-            map.flyTo({
-              center: [targetLng, targetLat],
-              zoom: 14,
-              pitch: 30,
-              speed: 0.9,
-              curve: 1.3,
-              essential: true,
-            });
-          }
+          queueCameraMove(targetLng, targetLat);
         }
       }
     }
@@ -206,7 +230,6 @@
     });
 
     map.on("move", updateConnectors);
-    map.on("render", updateConnectors);
     map.on("resize", updateConnectors);
 
     return {
@@ -218,6 +241,7 @@
         sync();
       },
       destroy() {
+        if (cameraTimeout) clearTimeout(cameraTimeout);
         markers.forEach((m) => m.marker.remove());
         markers = [];
         svg.remove();

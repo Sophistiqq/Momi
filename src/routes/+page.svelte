@@ -8,6 +8,8 @@
 
   let posts = $state<Post[]>([]);
   let loading = $state(true);
+  let loadingMore = $state(false);
+  let hasMore = $state(true);
   let error = $state(false);
   let activePost = $state<Post | null>(null);
   let focusedPostId = $state<string | null>(null);
@@ -24,11 +26,11 @@
 
   let countText = $derived(
     posts.length
-      ? `${posts.length} moment${posts.length > 1 ? "s" : ""}`
+      ? `${posts.length}${hasMore ? "+" : ""} moment${posts.length > 1 ? "s" : ""}`
       : "",
   );
 
-  onMount(async () => {
+  onMount(() => {
     window.addEventListener("popstate", () => {
       if (activePost) activePost = null;
       else if (showTrash) showTrash = false;
@@ -36,25 +38,31 @@
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") load(true);
     });
-    await initSession();
-    await load();
+    initSession();
+    load();
     initPushNotifications();
   });
 
-  // IntersectionObserver to sync the background map camera with the currently centered slide
+  // IntersectionObserver to sync the background map camera and trigger infinite scroll pagination
   function setupObserver(node: HTMLElement) {
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
             const id = entry.target.getAttribute("data-post-id");
-            if (id) focusedPostId = id;
+            if (id) {
+              focusedPostId = id;
+              const index = posts.findIndex((p) => p.id === id);
+              if (posts.length >= 20 && index >= posts.length - 3 && hasMore && !loadingMore && !loading) {
+                loadMore();
+              }
+            }
           }
         });
       },
       {
         root: node,
-        threshold: 0.6,
+        threshold: 0.5,
       },
     );
 
@@ -77,7 +85,9 @@
     if (!silent) loading = true;
     error = false;
     try {
-      posts = await fetchPosts();
+      const data = await fetchPosts({ limit: 20 });
+      posts = data;
+      hasMore = data.length >= 20;
       if (posts.length > 0 && !focusedPostId) {
         focusedPostId = posts[0].id;
       }
@@ -89,6 +99,28 @@
       if (!silent) error = true;
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadMore() {
+    if (loadingMore || !hasMore || posts.length === 0) return;
+    loadingMore = true;
+    try {
+      const lastPost = posts[posts.length - 1];
+      const older = await fetchPosts({ limit: 20, before: lastPost.created_at });
+      if (older.length < 20) {
+        hasMore = false;
+      }
+      if (older.length > 0) {
+        // Append without duplicating IDs
+        const existing = new Set(posts.map((p) => p.id));
+        const unique = older.filter((p) => !existing.has(p.id));
+        posts = [...posts, ...unique];
+      }
+    } catch {
+      // Silently catch pagination errors
+    } finally {
+      loadingMore = false;
     }
   }
 
