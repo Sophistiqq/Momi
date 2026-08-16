@@ -407,6 +407,7 @@
         tabindex="0"
         aria-label="Media viewer stage (tap to toggle fit)"
         onclick={onMediaClick}
+        ondblclick={handleDoubleTapLike}
         ontouchstart={onTouchStart}
         ontouchmove={onTouchMove}
         ontouchend={onTouchEnd}
@@ -481,7 +482,7 @@
         {/if}
 
         {#if heartBurst}
-          <div class="stl-heart-burst" aria-hidden="true">
+          <div class="pv-heart-burst" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="76" height="76" fill="currentColor">
               <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
             </svg>
@@ -1055,6 +1056,26 @@
     width: 22px;
     height: 22px;
     flex-shrink: 0;
+  }
+
+  .pv-heart-burst {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 15;
+    animation: heart-burst 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    color: #ff5577;
+    filter: drop-shadow(0 0 16px rgba(255, 85, 119, 0.65));
+  }
+
+  @keyframes heart-burst {
+    0% { opacity: 0; transform: scale(0.5); }
+    35% { opacity: 1; transform: scale(1.15); }
+    70% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(0.85); }
   }
 
   .pv-heart-icon {
