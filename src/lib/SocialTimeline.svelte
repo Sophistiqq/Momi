@@ -11,11 +11,13 @@
 
   interface Props {
     posts: Post[];
+    focusedPostId?: string | null;
     onOpenPost: (post: Post) => void;
     onShowOnMap: (post: Post) => void;
+    onFocusPost?: (id: string) => void;
   }
 
-  let { posts, onOpenPost, onShowOnMap }: Props = $props();
+  let { posts, focusedPostId, onOpenPost, onShowOnMap, onFocusPost }: Props = $props();
 
   // Plain reactive maps for item states to prevent Svelte 5 unsafe state mutation during template evaluation
   let likedMap = $state<Record<string, boolean>>({});
@@ -27,10 +29,50 @@
   let commentingMap = $state<Record<string, boolean>>({});
   let heartBurstId = $state<string | null>(null);
 
+  // Sync scroll position & focused post with map view
+  function setupTimelineObserver(node: HTMLElement, _postsList: Post[]) {
+    let observer: IntersectionObserver | null = null;
+
+    function attach() {
+      if (observer) observer.disconnect();
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) {
+              const id = entry.target.getAttribute("data-post-id");
+              if (id && onFocusPost) {
+                onFocusPost(id);
+              }
+            }
+          }
+        },
+        {
+          root: null,
+          rootMargin: "-25% 0px -40% 0px",
+          threshold: 0.1,
+        }
+      );
+
+      const cards = node.querySelectorAll(".stl-card");
+      cards.forEach((c) => observer?.observe(c));
+    }
+
+    attach();
+
+    return {
+      update(_newPosts: Post[]) {
+        attach();
+      },
+      destroy() {
+        if (observer) observer.disconnect();
+      },
+    };
+  }
+
   async function toggleLike(postId: string) {
     const post = posts.find((p) => p.id === postId);
-    const isLiked = likedMap[postId] ?? post?.liked_by_me ?? false;
-    const currentCount = likeCountMap[postId] ?? post?.like_count ?? 0;
+    const isLiked = likedMap[postId] !== undefined ? likedMap[postId] : (post?.liked_by_me ?? false);
+    const currentCount = likeCountMap[postId] !== undefined ? likeCountMap[postId] : (post?.like_count ?? 0);
     const nextLiked = !isLiked;
     const nextCount = nextLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
 
@@ -85,7 +127,13 @@
     try {
       if (await addComment(postId, body)) {
         newCommentMap[postId] = "";
-        commentsMap[postId] = await fetchComments(postId);
+        const updated = await fetchComments(postId);
+        commentsMap[postId] = updated;
+        const post = posts.find((p) => p.id === postId);
+        if (post) {
+          post.comment_count = updated.length;
+          post.comments_count = updated.length;
+        }
       }
     } catch {
     } finally {
@@ -114,7 +162,7 @@
   }
 </script>
 
-<div class="stl-feed" role="feed" aria-label="Moments timeline">
+<div class="stl-feed" role="feed" aria-label="Moments timeline" use:setupTimelineObserver={posts}>
   {#if posts.length === 0}
     <div class="stl-empty">
       <svg viewBox="0 0 48 48" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -126,10 +174,11 @@
     </div>
   {:else}
     {#each posts as post, idx (post.id)}
-      {@const isLiked = likedMap[post.id] ?? false}
-      {@const likeCount = likeCountMap[post.id] ?? 0}
+      {@const isLiked = likedMap[post.id] !== undefined ? likedMap[post.id] : (post.liked_by_me ?? false)}
+      {@const likeCount = likeCountMap[post.id] !== undefined ? likeCountMap[post.id] : (post.like_count ?? 0)}
       {@const isExpanded = commentExpandedMap[post.id] ?? false}
       {@const comments = commentsMap[post.id] ?? []}
+      {@const commentCount = commentsMap[post.id] !== undefined ? commentsMap[post.id].length : (post.comments_count ?? post.comment_count ?? 0)}
       {@const commentsLoading = commentsLoadingMap[post.id] ?? false}
       {@const isCommenting = commentingMap[post.id] ?? false}
       {@const media = post.post_media ?? []}
@@ -181,7 +230,14 @@
                 </div>
               </div>
             {:else}
-              <img class="stl-media" src={thumb.url} alt={post.caption ?? ""} loading="lazy" />
+              <img
+                class="stl-media"
+                src={thumb.url}
+                alt={post.caption ?? ""}
+                loading="lazy"
+                decoding="async"
+                fetchpriority={idx < 2 ? "high" : "low"}
+              />
             {/if}
 
             {#if media.length > 1}
@@ -252,8 +308,8 @@
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
               </svg>
             </span>
-            {#if comments.length > 0}
-              <span class="stl-action-count">{comments.length}</span>
+            {#if commentCount > 0}
+              <span class="stl-action-count">{commentCount}</span>
             {/if}
           </button>
 
@@ -383,6 +439,8 @@
     position: relative;
     background: transparent;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    content-visibility: auto;
+    contain-intrinsic-size: 1px 520px;
     animation: stl-rise 0.38s cubic-bezier(0.2, 0.7, 0.3, 1) both;
   }
 

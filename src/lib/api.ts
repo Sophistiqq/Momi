@@ -23,6 +23,8 @@ export interface Post {
   liked_by_me?: boolean;
   like_count?: number;
   likes?: { user_id: string; author: string }[];
+  comment_count?: number;
+  comments_count?: number;
 }
 
 export interface Comment {

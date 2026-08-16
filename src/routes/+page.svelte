@@ -239,10 +239,43 @@
     if (history.state?.viewer) history.back();
   }
 
+  let timelineScrollY = $state(0);
+
+  function switchTab(newTab: "map" | "timeline"): void {
+    if (newTab === activeTab) return;
+
+    if (activeTab === "timeline") {
+      timelineScrollY = window.scrollY;
+    }
+
+    activeTab = newTab;
+
+    if (newTab === "timeline") {
+      requestAnimationFrame(() => {
+        if (focusedPostId) {
+          const el = document.querySelector(`.stl-card[data-post-id="${focusedPostId}"]`);
+          if (el) {
+            el.scrollIntoView({ behavior: "instant", block: "center" });
+            return;
+          }
+        }
+        if (timelineScrollY > 0) {
+          window.scrollTo({ top: timelineScrollY, behavior: "instant" });
+        }
+      });
+    } else if (newTab === "map") {
+      requestAnimationFrame(() => {
+        if (focusedPostId) {
+          const post = posts.find((p) => p.id === focusedPostId);
+          if (post) focusPost(post, "auto");
+        }
+      });
+    }
+  }
+
   function handleShowOnMap(post: Post): void {
-    activeTab = "map";
-    // Small delay to let the map tab render before scrolling the post into view
-    setTimeout(() => focusPost(post, "auto"), 50);
+    focusedPostId = post.id;
+    switchTab("map");
   }
 
   async function signOutAndReset(): Promise<void> {
@@ -386,7 +419,7 @@
         class:vs-active={activeTab === "map"}
         role="tab"
         aria-selected={activeTab === "map"}
-        onclick={() => (activeTab = "map")}
+        onclick={() => switchTab("map")}
         id="tab-map"
       >
         <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -401,7 +434,7 @@
         class:vs-active={activeTab === "timeline"}
         role="tab"
         aria-selected={activeTab === "timeline"}
-        onclick={() => (activeTab = "timeline")}
+        onclick={() => switchTab("timeline")}
         id="tab-timeline"
       >
         <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -571,8 +604,10 @@
         <!-- Social timeline view -->
         <SocialTimeline
           {posts}
+          focusedPostId={focusedPostId}
           onOpenPost={openPost}
           onShowOnMap={handleShowOnMap}
+          onFocusPost={(id) => (focusedPostId = id)}
         />
       {/if}
     {/if}

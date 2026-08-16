@@ -479,7 +479,7 @@ async function handleList(req: Request, user?: any): Promise<Response> {
 
   let query = supabase
     .from('posts')
-    .select('id, caption, author, created_at, status, location, lat, lng, mentions, post_media(id, object_key, mime_type, sort_order), post_likes(user_id, author)')
+    .select('id, caption, author, created_at, status, location, lat, lng, mentions, post_media(id, object_key, mime_type, sort_order), post_likes(user_id, author), comments(id)')
     .order('created_at', { ascending: false })
     .limit(pageSize);
 
@@ -498,12 +498,15 @@ async function handleList(req: Request, user?: any): Promise<Response> {
 
   const rows = (data ?? []).map((post) => {
     const postLikes = (post as any).post_likes ?? [];
+    const postComments = (post as any).comments ?? [];
     const likedByMe = user ? postLikes.some((l: any) => l.user_id === user.id) : false;
     return {
       ...post,
       liked_by_me: likedByMe,
       like_count: postLikes.length,
       likes: postLikes,
+      comment_count: postComments.length,
+      comments_count: postComments.length,
       post_media: (post.post_media ?? []).map((m: any) => ({
         ...m,
         url: `https://wmouyojmcelxgkwjfpxz.supabase.co/storage/v1/object/public/moments/${m.object_key}`,
