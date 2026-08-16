@@ -245,9 +245,9 @@
         type: "circle",
         source: "posts",
         paint: {
-          "circle-radius": 6.5,
+          "circle-radius": 5,
           "circle-color": "#d9a066",
-          "circle-stroke-width": 2.5,
+          "circle-stroke-width": 2,
           "circle-stroke-color": "rgba(255, 255, 255, 0.85)",
         },
       });
@@ -258,7 +258,7 @@
         source: "posts",
         filter: ["==", ["get", "id"], ""],
         paint: {
-          "circle-radius": 15,
+          "circle-radius": 12,
           "circle-color": "rgba(255, 255, 255, 0.15)",
           "circle-stroke-width": 1,
           "circle-stroke-color": "rgba(217, 160, 102, 0.35)",
@@ -271,9 +271,9 @@
         source: "posts",
         filter: ["==", ["get", "id"], ""],
         paint: {
-          "circle-radius": 11,
+          "circle-radius": 9,
           "circle-color": "#ffffff",
-          "circle-stroke-width": 2.5,
+          "circle-stroke-width": 2,
           "circle-stroke-color": "#d9a066",
         },
       });
