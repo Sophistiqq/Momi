@@ -3,7 +3,7 @@
   import PostViewer from "$lib/PostViewer.svelte";
   import MapTimeline from "$lib/MapTimeline.svelte";
   import SocialTimeline from "$lib/SocialTimeline.svelte";
-  import { fetchPosts, getCachedPosts, formatDate, formatDateTime, purgePost, restorePost, type Post } from "$lib/api";
+  import { fetchPosts, fetchComments, getCachedPosts, formatDate, formatDateTime, purgePost, restorePost, type Post, type Comment } from "$lib/api";
   import { session, initSession, signOut } from "$lib/session.svelte";
   import { initPushNotifications } from "$lib/push";
 
@@ -14,7 +14,7 @@
   let focusedPostId = $state<string | null>(null);
   let showConnectors = $state(false);
   let showScrubber = $state(true);
-  let activeTab = $state<"map" | "timeline">("map");
+  let activeTab = $state<"map" | "timeline">("timeline");
 
   // Trash overlay state
   let showTrash = $state(false);
@@ -24,6 +24,33 @@
   let purgingId = $state<string | null>(null);
   let restoringId = $state<string | null>(null);
   let confirmPurgeId = $state<string | null>(null);
+
+  // --- Page-level comments cache (feeds PostViewer to avoid a fetch on open) ---
+  let commentsCache = $state<Record<string, Comment[]>>({});
+  const commentsCachePrefetching = new Set<string>();
+
+  async function prefetchPostComments(postId: string) {
+    if (commentsCache[postId] !== undefined || commentsCachePrefetching.has(postId)) return;
+    const post = posts.find((p) => p.id === postId);
+    const knownCount = post?.comment_count ?? post?.comments_count ?? -1;
+    if (knownCount === 0) {
+      commentsCache[postId] = [];
+      return;
+    }
+    commentsCachePrefetching.add(postId);
+    try {
+      commentsCache[postId] = await fetchComments(postId);
+    } catch {
+      // Silent — PostViewer will fall back to fetching itself.
+    } finally {
+      commentsCachePrefetching.delete(postId);
+    }
+  }
+
+  // Warm up comments whenever the focused post changes (covers both map swipe and timeline scroll).
+  $effect(() => {
+    if (focusedPostId) prefetchPostComments(focusedPostId);
+  });
 
   let countText = $derived(
     posts.length
@@ -187,6 +214,34 @@
       ? (focusedIndex / (posts.length - 1)) * 100
       : 0
   );
+
+  // --- Pagination (client-side windowing) ---
+  const PAGE_SIZE = 12;
+  let visibleCount = $state(PAGE_SIZE);
+  let visiblePosts = $derived(posts.slice(0, visibleCount));
+  let hasMore = $derived(visibleCount < posts.length);
+
+  function loadMore() {
+    visibleCount = Math.min(visibleCount + PAGE_SIZE, posts.length);
+  }
+
+  // Svelte action: attach an IntersectionObserver to sentinel elements so
+  // that scrolling near the end automatically reveals the next batch.
+  function setupSentinel(node: HTMLElement) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) loadMore();
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(node);
+    return { destroy() { observer.disconnect(); } };
+  }
+
+  // Reset visible window whenever the full post list refreshes
+  $effect(() => {
+    if (posts.length > 0) visibleCount = PAGE_SIZE;
+  });
 
   function handleScrubberInput(e: Event) {
     const target = e.target as HTMLInputElement;
@@ -416,21 +471,6 @@
     <div class="view-switcher" role="tablist" aria-label="View mode">
       <button
         class="vs-tab"
-        class:vs-active={activeTab === "map"}
-        role="tab"
-        aria-selected={activeTab === "map"}
-        onclick={() => switchTab("map")}
-        id="tab-map"
-      >
-        <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polygon points="2 5 7 2.5 13 5 18 2.5 18 15.5 13 18 7 15.5 2 18"/>
-          <line x1="7" y1="2.5" x2="7" y2="15.5"/>
-          <line x1="13" y1="5" x2="13" y2="18"/>
-        </svg>
-        Map
-      </button>
-      <button
-        class="vs-tab"
         class:vs-active={activeTab === "timeline"}
         role="tab"
         aria-selected={activeTab === "timeline"}
@@ -443,6 +483,21 @@
           <rect x="2" y="16" width="7" height="2" rx="1"/>
         </svg>
         Timeline
+      </button>
+      <button
+        class="vs-tab"
+        class:vs-active={activeTab === "map"}
+        role="tab"
+        aria-selected={activeTab === "map"}
+        onclick={() => switchTab("map")}
+        id="tab-map"
+      >
+        <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="2 5 7 2.5 13 5 18 2.5 18 15.5 13 18 7 15.5 2 18"/>
+          <line x1="7" y1="2.5" x2="7" y2="15.5"/>
+          <line x1="13" y1="5" x2="13" y2="18"/>
+        </svg>
+        Map
       </button>
     </div>
   </div>
@@ -553,8 +608,8 @@
         {/if}
 
         <div class="snap-feed-wrapper">
-          <div class="snap-feed" use:setupObserver={posts}>
-            {#each posts as post (post.id)}
+          <div class="snap-feed" use:setupObserver={visiblePosts}>
+            {#each visiblePosts as post (post.id)}
               <section
                 class="snap-slide"
                 data-post-id={post.id}
@@ -598,17 +653,28 @@
                 </div>
               </section>
             {/each}
+            {#if hasMore}
+              <!-- Sentinel: scrolling to this triggers loading the next page of map slides -->
+              <div
+                class="snap-slide snap-sentinel"
+                use:setupSentinel
+              ></div>
+            {/if}
           </div>
         </div>
       {:else}
         <!-- Social timeline view -->
         <SocialTimeline
-          {posts}
+          posts={visiblePosts}
           focusedPostId={focusedPostId}
           onOpenPost={openPost}
           onShowOnMap={handleShowOnMap}
           onFocusPost={(id) => (focusedPostId = id)}
         />
+        {#if hasMore}
+          <!-- Sentinel: when this enters the viewport the next batch of cards is revealed -->
+          <div class="load-more-sentinel" use:setupSentinel aria-hidden="true"></div>
+        {/if}
       {/if}
     {/if}
   </main>
@@ -617,6 +683,7 @@
   {#if activePost}
     <PostViewer
       post={activePost}
+      initialComments={commentsCache[activePost.id]}
       onClose={closePost}
       onDelete={handleDeletePost}
       onRestore={handleRestorePost}

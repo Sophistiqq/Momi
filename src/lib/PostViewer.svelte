@@ -13,13 +13,14 @@
 
   interface Props {
     post: Post;
+    initialComments?: Comment[];
     onClose: () => void;
     onDelete?: (id: string) => void;
     onRestore?: (id: string) => void;
     onShowOnMap?: (post: Post) => void;
   }
 
-  let { post, onClose, onDelete, onRestore, onShowOnMap }: Props = $props();
+  let { post, initialComments, onClose, onDelete, onRestore, onShowOnMap }: Props = $props();
 
   let mediaIndex = $state(0);
   let fitMode = $state(false);
@@ -56,12 +57,27 @@
     fitMode = false;
     zoom = 1;
     pinch = { active: false, dist: 0, scale: 1 };
-    comments = [];
     editingPost = false;
     isLiked = post.liked_by_me ?? false;
     likeCount = post.like_count ?? 0;
     heartBurst = false;
 
+    // Use prefetched comments from the parent cache if available.
+    if (initialComments !== undefined) {
+      comments = initialComments;
+      loadingComments = false;
+      return;
+    }
+
+    // Skip the network round-trip when we already know there are no comments.
+    const knownCount = post.comment_count ?? post.comments_count ?? -1;
+    if (knownCount === 0) {
+      comments = [];
+      loadingComments = false;
+      return;
+    }
+
+    comments = [];
     loadingComments = true;
     fetchComments(post.id)
       .then((c) => (comments = c))

@@ -29,32 +29,74 @@
   let commentingMap = $state<Record<string, boolean>>({});
   let heartBurstId = $state<string | null>(null);
 
+  // Non-reactive: only used as a control-flow guard, never drives rendering.
+  const prefetching = new Set<string>();
+
+  async function prefetchComments(postId: string) {
+    // Already cached, already in-flight, or known to be empty → skip.
+    if (commentsMap[postId] !== undefined || prefetching.has(postId)) return;
+    const post = posts.find((p) => p.id === postId);
+    const knownCount = post?.comment_count ?? post?.comments_count ?? -1;
+    if (knownCount === 0) {
+      commentsMap[postId] = [];
+      return;
+    }
+
+    prefetching.add(postId);
+    // Set loading so a mid-flight tap shows the spinner instead of an empty flash.
+    commentsLoadingMap[postId] = true;
+    try {
+      commentsMap[postId] = await fetchComments(postId);
+    } catch {
+      // Silent failure — commentsMap stays undefined so toggleComments retries on tap.
+      delete commentsMap[postId];
+    } finally {
+      prefetching.delete(postId);
+      commentsLoadingMap[postId] = false;
+    }
+  }
+
   // Sync scroll position & focused post with map view
   function setupTimelineObserver(node: HTMLElement, _postsList: Post[]) {
-    let observer: IntersectionObserver | null = null;
+    let focusObserver: IntersectionObserver | null = null;
+    let prefetchObserver: IntersectionObserver | null = null;
 
     function attach() {
-      if (observer) observer.disconnect();
-      observer = new IntersectionObserver(
+      if (focusObserver) focusObserver.disconnect();
+      if (prefetchObserver) prefetchObserver.disconnect();
+
+      // Tight margin: only fires when the card is well centred — drives map sync.
+      focusObserver = new IntersectionObserver(
         (entries) => {
           for (const entry of entries) {
             if (entry.isIntersecting) {
               const id = entry.target.getAttribute("data-post-id");
-              if (id && onFocusPost) {
-                onFocusPost(id);
-              }
+              if (id && onFocusPost) onFocusPost(id);
             }
           }
         },
-        {
-          root: null,
-          rootMargin: "-25% 0px -40% 0px",
-          threshold: 0.1,
-        }
+        { root: null, rootMargin: "-25% 0px -40% 0px", threshold: 0.1 }
+      );
+
+      // Wide margin: fires ~500 px before the card reaches the viewport so
+      // comments are warmed up well before the user can tap.
+      prefetchObserver = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) {
+              const id = entry.target.getAttribute("data-post-id");
+              if (id) prefetchComments(id);
+            }
+          }
+        },
+        { root: null, rootMargin: "500px 0px" }
       );
 
       const cards = node.querySelectorAll(".stl-card");
-      cards.forEach((c) => observer?.observe(c));
+      cards.forEach((c) => {
+        focusObserver?.observe(c);
+        prefetchObserver?.observe(c);
+      });
     }
 
     attach();
@@ -64,7 +106,8 @@
         attach();
       },
       destroy() {
-        if (observer) observer.disconnect();
+        focusObserver?.disconnect();
+        prefetchObserver?.disconnect();
       },
     };
   }
@@ -107,7 +150,17 @@
     const expanded = commentExpandedMap[postId] ?? false;
     commentExpandedMap[postId] = !expanded;
 
-    if (!expanded && commentsMap[postId] === undefined) {
+    // Already cached or a prefetch is in-flight → just expand and wait.
+    if (!expanded && commentsMap[postId] === undefined && !prefetching.has(postId)) {
+      // If we already know the count is 0, skip the network round-trip and
+      // just show the empty composer straight away.
+      const post = posts.find((p) => p.id === postId);
+      const knownCount = post?.comment_count ?? post?.comments_count ?? -1;
+      if (knownCount === 0) {
+        commentsMap[postId] = [];
+        return;
+      }
+
       commentsLoadingMap[postId] = true;
       try {
         const fetched = await fetchComments(postId);
@@ -268,6 +321,11 @@
           </div>
         {/if}
 
+        <!-- Date stamp -->
+        <div class="stl-date-strip">
+          <time datetime={post.created_at}>{formatDateTime(post.created_at)}</time>
+        </div>
+
         <!-- Actions -->
         <div class="stl-actions">
           <button
@@ -405,11 +463,6 @@
             </div>
           </div>
         {/if}
-
-        <!-- Date stamp -->
-        <div class="stl-date-strip">
-          <time datetime={post.created_at}>{formatDateTime(post.created_at)}</time>
-        </div>
       </article>
     {/each}
   {/if}
