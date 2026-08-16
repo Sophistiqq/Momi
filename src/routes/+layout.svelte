@@ -40,8 +40,9 @@
 </script>
 
 {#if !session.ready}
-  <div class="state show">
-    <h2>Loading…</h2>
+  <div class="state show" role="status" aria-label="Loading session">
+    <h1 class="logo" style="margin-bottom: 20px; opacity: 0.85;">Moments</h1>
+    <div class="skel-line" style="width: 140px; height: 6px; border-radius: 999px;"></div>
   </div>
 {:else if session.user}
   <slot />

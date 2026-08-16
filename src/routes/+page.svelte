@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { pushState } from "$app/navigation";
   import PostViewer from "$lib/PostViewer.svelte";
   import MapTimeline from "$lib/MapTimeline.svelte";
   import SocialTimeline from "$lib/SocialTimeline.svelte";
@@ -143,7 +144,7 @@
 
   async function openTrash() {
     showTrash = true;
-    history.pushState({ trash: true }, "");
+    pushState("", { trash: true });
     trashLoading = true;
     trashError = false;
     confirmPurgeId = null;
@@ -278,7 +279,7 @@
     } else {
       apply();
     }
-    history.pushState({ viewer: true }, "");
+    pushState("", { viewer: true });
   }
 
   function closePost(): void {
@@ -504,26 +505,52 @@
 
   <main class:timeline-main={activeTab === "timeline"}>
     {#if loading}
-      <div class="snap-feed-wrapper" role="status" aria-label="Loading moments">
-        <div class="snap-feed" style="overflow-x: hidden;">
+      {#if activeTab === "timeline"}
+        <div class="stl-feed" style="max-width: 600px; margin: 0 auto; width: 100%;" role="status" aria-label="Loading timeline">
           {#each [0, 1, 2] as n (n)}
-            <div class="snap-slide">
-              <div class="skel-hud">
-                <div class="hud-top">
-                  <div class="skel-line" style="width: 70px; height: 16px; border-radius: 12px;"></div>
-                  <div class="skel-line" style="width: 50px; height: 14px;"></div>
+            <article class="skel-timeline-card">
+              <header class="skel-timeline-head">
+                <div class="skel-media skel-avatar"></div>
+                <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
+                  <div class="skel-line" style="width: 110px; height: 13px;"></div>
+                  <div class="skel-line" style="width: 80px; height: 10px;"></div>
                 </div>
-                <div class="skel-line" style="width: 85%; height: 14px; margin-top: 4px;"></div>
-                <div class="skel-line" style="width: 60%; height: 14px;"></div>
-                <div class="hud-bottom" style="margin-top: 6px;">
-                  <div class="skel-line" style="width: 80px; height: 12px;"></div>
-                  <div class="skel-line" style="width: 24px; height: 24px; border-radius: 50%;"></div>
-                </div>
+                <div class="skel-line" style="width: 45px; height: 10px;"></div>
+              </header>
+              <div class="skel-media" style="width: 100%; aspect-ratio: 1 / 1; border-radius: 0;"></div>
+              <div style="padding: 12px 16px 4px; display: flex; flex-direction: column; gap: 6px;">
+                <div class="skel-line" style="width: 80%; height: 12px;"></div>
+                <div class="skel-line" style="width: 50%; height: 12px;"></div>
               </div>
-            </div>
+              <div style="padding: 10px 16px 14px; display: flex; gap: 18px;">
+                <div class="skel-line" style="width: 24px; height: 24px; border-radius: 50%;"></div>
+                <div class="skel-line" style="width: 24px; height: 24px; border-radius: 50%;"></div>
+              </div>
+            </article>
           {/each}
         </div>
-      </div>
+      {:else}
+        <div class="snap-feed-wrapper" role="status" aria-label="Loading moments">
+          <div class="snap-feed" style="overflow-x: hidden;">
+            {#each [0, 1, 2] as n (n)}
+              <div class="snap-slide">
+                <div class="skel-hud">
+                  <div class="hud-top">
+                    <div class="skel-line" style="width: 70px; height: 16px; border-radius: 12px;"></div>
+                    <div class="skel-line" style="width: 50px; height: 14px;"></div>
+                  </div>
+                  <div class="skel-line" style="width: 85%; height: 14px; margin-top: 4px;"></div>
+                  <div class="skel-line" style="width: 60%; height: 14px;"></div>
+                  <div class="hud-bottom" style="margin-top: 6px;">
+                    <div class="skel-line" style="width: 80px; height: 12px;"></div>
+                    <div class="skel-line" style="width: 24px; height: 24px; border-radius: 50%;"></div>
+                  </div>
+                </div>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
     {:else if error}
       <div class="state show">
         <h2>Couldn&rsquo;t load</h2>

@@ -39,6 +39,8 @@
   let likeCount = $state(0);
   let heartBurst = $state(false);
   let liking = $state(false);
+  let isVideoPaused = $state(false);
+  let videoEls = $state<(HTMLVideoElement | undefined)[]>([]);
 
   let mediaCell: HTMLDivElement | undefined;
   let viewerEl: HTMLDialogElement | undefined;
@@ -61,6 +63,8 @@
     isLiked = post.liked_by_me ?? false;
     likeCount = post.like_count ?? 0;
     heartBurst = false;
+    isVideoPaused = false;
+    requestAnimationFrame(() => updateSlideScales(false));
 
     // Use prefetched comments from the parent cache if available.
     if (initialComments !== undefined) {
@@ -89,11 +93,89 @@
     if (viewerEl && !viewerEl.open) viewerEl.showModal();
   });
 
+  // Autoplay video on current focused slide and pause other slides
+  $effect(() => {
+    const currentMedia = post?.post_media?.[mediaIndex];
+    const isVideo = (currentMedia?.mime_type || "").startsWith("video");
+
+    videoEls.forEach((vel, idx) => {
+      if (!vel) return;
+      if (idx === mediaIndex && isVideo) {
+        vel.currentTime = 0;
+        vel.play().then(() => {
+          isVideoPaused = false;
+        }).catch(() => {
+          // If unmuted autoplay is blocked by browser policy, fallback to muted autoplay
+          vel.muted = true;
+          vel.play().then(() => {
+            isVideoPaused = false;
+          }).catch(() => {});
+        });
+      } else {
+        vel.pause();
+      }
+    });
+
+    return () => {
+      videoEls.forEach((vel) => vel?.pause());
+    };
+  });
+
+  function toggleVideoPlay(i: number, e?: Event): void {
+    if (e) e.stopPropagation();
+    const vel = videoEls[i];
+    if (!vel) return;
+    if (vel.paused) {
+      vel.play().then(() => {
+        if (i === mediaIndex) isVideoPaused = false;
+      }).catch(() => {
+        vel.muted = true;
+        vel.play().then(() => {
+          if (i === mediaIndex) isVideoPaused = false;
+        }).catch(() => {});
+      });
+    } else {
+      vel.pause();
+      if (i === mediaIndex) isVideoPaused = true;
+    }
+  }
+
+  function getCoverScale(img: HTMLImageElement | null, container: HTMLElement | null): number {
+    if (!img || !container || !img.naturalWidth || !img.naturalHeight) return 1;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    if (!cw || !ch) return 1;
+    const containerRatio = cw / ch;
+    const imageRatio = img.naturalWidth / img.naturalHeight;
+    if (imageRatio > containerRatio) {
+      return imageRatio / containerRatio;
+    } else {
+      return containerRatio / imageRatio;
+    }
+  }
+
+  function updateSlideScales(animated = true): void {
+    if (!mediaCell) return;
+    const slides = mediaCell.querySelectorAll<HTMLElement>(".slide");
+    slides.forEach((slide, i) => {
+      const img = slide.querySelector<HTMLImageElement>("img");
+      if (!img) return;
+      if (i === mediaIndex && zoom > 1) return;
+      img.style.transition = animated ? "transform 0.32s cubic-bezier(0.22, 1, 0.36, 1)" : "none";
+      if (fitMode) {
+        img.style.transform = "scale(1)";
+      } else {
+        const s = getCoverScale(img, slide);
+        img.style.transform = `scale(${s.toFixed(4)})`;
+      }
+    });
+  }
+
   function goTo(i: number): void {
     const n = post.post_media.length;
     mediaIndex = Math.max(0, Math.min(n - 1, i));
     zoom = 1;
-    clearZoom();
+    clearZoom(false);
   }
 
   function swipe(dx: number): void {
@@ -142,16 +224,18 @@
   function onMediaClick(): void {
     if (zoom > 1) {
       zoom = 1;
-      clearZoom();
+      clearZoom(true);
       return;
     }
     fitMode = !fitMode;
+    updateSlideScales(true);
   }
 
   function applyZoom(e?: TouchEvent): void {
-    const slide = mediaCell?.querySelectorAll(".slide")[mediaIndex];
-    const el = slide?.querySelector("img, video") as HTMLElement | null;
-    if (!slide || !el) return;
+    const slide = mediaCell?.querySelectorAll<HTMLElement>(".slide")[mediaIndex];
+    const img = slide?.querySelector<HTMLImageElement>("img");
+    if (!slide || !img) return;
+    img.style.transition = "none";
     if (zoom > 1) {
       const r = slide.getBoundingClientRect();
       const cx =
@@ -162,19 +246,34 @@
         e && e.touches.length >= 2
           ? e.touches[0].clientY + (e.touches[1].clientY - e.touches[0].clientY) / 2
           : r.height / 2;
-      el.style.transformOrigin = cx - r.left + "px " + (cy - r.top) + "px";
-      el.style.transform = "scale(" + zoom + ")";
+      const baseScale = fitMode ? 1 : getCoverScale(img, slide);
+      img.style.transformOrigin = cx - r.left + "px " + (cy - r.top) + "px";
+      img.style.transform = "scale(" + (zoom * baseScale).toFixed(4) + ")";
     } else {
-      clearZoom();
+      clearZoom(true);
     }
   }
 
-  function clearZoom(): void {
-    const slide = mediaCell?.querySelectorAll(".slide")[mediaIndex];
-    const el = slide?.querySelector("img, video") as HTMLElement | null;
-    if (!el) return;
-    el.style.transform = "";
-    el.style.transformOrigin = "";
+  function clearZoom(animated = false): void {
+    const slide = mediaCell?.querySelectorAll<HTMLElement>(".slide")[mediaIndex];
+    const img = slide?.querySelector<HTMLImageElement>("img");
+    if (!img) return;
+    if (animated) {
+      img.style.transition = "transform 0.32s cubic-bezier(0.22, 1, 0.36, 1)";
+      const targetScale = fitMode ? 1 : getCoverScale(img, slide);
+      img.style.transform = `scale(${targetScale.toFixed(4)})`;
+      const reset = () => {
+        img.style.transformOrigin = "";
+        img.removeEventListener("transitionend", reset);
+      };
+      img.addEventListener("transitionend", reset, { once: true });
+      setTimeout(reset, 350);
+    } else {
+      img.style.transition = "none";
+      img.style.transformOrigin = "";
+      const targetScale = fitMode ? 1 : getCoverScale(img, slide);
+      img.style.transform = `scale(${targetScale.toFixed(4)})`;
+    }
   }
 
   let heartBurstTimer: ReturnType<typeof setTimeout> | null = null;
@@ -421,15 +520,68 @@
           {#each post.post_media as m, i (m.id)}
             <div class="pv-slide slide">
               {#if (m.mime_type || "").startsWith("video")}
-                <!-- svelte-ignore a11y_media_has_caption -->
-                <video
-                  src={m.url}
-                  controls={i === mediaIndex}
-                  preload="metadata"
-                  onclick={(e) => e.stopPropagation()}
-                ></video>
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+                <div
+                  class="pv-video-container"
+                  role="button"
+                  tabindex="0"
+                  aria-label={isVideoPaused ? "Play video" : "Pause video"}
+                  onclick={(e) => {
+                    if (zoom > 1) {
+                      zoom = 1;
+                      clearZoom(true);
+                      return;
+                    }
+                    toggleVideoPlay(i, e);
+                  }}
+                  ondblclick={(e) => {
+                    e.stopPropagation();
+                    handleDoubleTapLike();
+                  }}
+                >
+                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <video
+                    bind:this={videoEls[i]}
+                    src={m.url}
+                    playsinline
+                    loop
+                    preload="auto"
+                    onplay={() => {
+                      if (i === mediaIndex) isVideoPaused = false;
+                    }}
+                    onpause={(e) => {
+                      const v = e.currentTarget;
+                      if (v && v.ended) return;
+                      if (i === mediaIndex) isVideoPaused = true;
+                    }}
+                    onended={(e) => {
+                      const v = e.currentTarget;
+                      if (v && !isVideoPaused) {
+                        v.currentTime = 0;
+                        v.play().catch(() => {});
+                      }
+                    }}
+                  ></video>
+                  {#if i === mediaIndex && isVideoPaused}
+                    <div class="pv-video-badge" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
+                        <path d="M8 5v14l11-7z"/>
+                      </svg>
+                    </div>
+                  {/if}
+                </div>
               {:else}
-                <img src={m.url} alt={post.caption || ""} />
+                <img
+                  src={m.url}
+                  alt={post.caption || ""}
+                  onload={(e) => {
+                    const slide = e.currentTarget.closest('.slide') as HTMLElement | null;
+                    if (slide && !fitMode) {
+                      const s = getCoverScale(e.currentTarget, slide);
+                      e.currentTarget.style.transform = `scale(${s.toFixed(4)})`;
+                    }
+                  }}
+                />
               {/if}
             </div>
           {/each}
@@ -890,20 +1042,62 @@
   .pv-slide img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
     user-select: none;
     -webkit-user-drag: none;
+    transform-origin: center center;
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  .pv-media-cell.pv-fit .pv-slide img {
-    object-fit: contain;
+  .pv-video-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    outline: none;
+    user-select: none;
   }
 
   .pv-slide video {
     width: 100%;
     height: 100%;
     object-fit: contain;
+    display: block;
+    background: #000;
+  }
+
+  .pv-video-badge {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(1);
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: rgba(14, 14, 18, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 5;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    animation: pv-badge-pop 0.22s cubic-bezier(0.18, 0.89, 0.32, 1.28) both;
+  }
+
+  .pv-video-badge svg {
+    margin-left: 3px; /* visual center for play triangle */
+  }
+
+  @keyframes pv-badge-pop {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.65); }
+    100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   }
 
   .pv-media-counter {
