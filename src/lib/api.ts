@@ -20,6 +20,9 @@ export interface Post {
   lng?: number | null;
   mentions?: string[];
   post_media: Media[];
+  liked_by_me?: boolean;
+  like_count?: number;
+  likes?: { user_id: string; author: string }[];
 }
 
 export interface Comment {
@@ -83,6 +86,15 @@ export async function addComment(postId: string, body: string): Promise<boolean>
     body: JSON.stringify({ body }),
   });
   return res.ok;
+}
+
+export async function toggleLike(postId: string): Promise<{ ok: boolean; liked: boolean; like_count: number }> {
+  const res = await fetch(`/share-target/posts/${postId}/like`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(String(res.status));
+  return res.json();
 }
 
 export async function updatePost(

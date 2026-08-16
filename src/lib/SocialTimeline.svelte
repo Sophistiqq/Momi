@@ -2,6 +2,7 @@
   import {
     fetchComments,
     addComment,
+    toggleLike as apiToggleLike,
     formatDate,
     formatDateTime,
     type Post,
@@ -26,11 +27,38 @@
   let commentingMap = $state<Record<string, boolean>>({});
   let heartBurstId = $state<string | null>(null);
 
-  function toggleLike(postId: string) {
-    const isLiked = likedMap[postId] ?? false;
-    const currentCount = likeCountMap[postId] ?? 0;
-    likedMap[postId] = !isLiked;
-    likeCountMap[postId] = !isLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
+  async function toggleLike(postId: string) {
+    const post = posts.find((p) => p.id === postId);
+    const isLiked = likedMap[postId] ?? post?.liked_by_me ?? false;
+    const currentCount = likeCountMap[postId] ?? post?.like_count ?? 0;
+    const nextLiked = !isLiked;
+    const nextCount = nextLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
+
+    // Optimistic update
+    likedMap[postId] = nextLiked;
+    likeCountMap[postId] = nextCount;
+    if (post) {
+      post.liked_by_me = nextLiked;
+      post.like_count = nextCount;
+    }
+
+    try {
+      const res = await apiToggleLike(postId);
+      likedMap[postId] = res.liked;
+      likeCountMap[postId] = res.like_count;
+      if (post) {
+        post.liked_by_me = res.liked;
+        post.like_count = res.like_count;
+      }
+    } catch {
+      // Revert on failure
+      likedMap[postId] = isLiked;
+      likeCountMap[postId] = currentCount;
+      if (post) {
+        post.liked_by_me = isLiked;
+        post.like_count = currentCount;
+      }
+    }
   }
 
   async function toggleComments(postId: string) {

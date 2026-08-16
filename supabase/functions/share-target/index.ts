@@ -76,8 +76,14 @@ Deno.serve(async (req) => {
       return handlePushUnsubscribe(req, user);
     }
 
+    // Likes on a post.
+    const likeMatch = url.pathname.match(/\/share-target\/posts\/([^/]+)\/like$/);
+    if (req.method === 'POST' && likeMatch) {
+      return handleToggleLike(likeMatch[1], user);
+    }
+
     if (req.method === 'GET' && url.pathname.endsWith('/share-target/posts')) {
-      return handleList(req);
+      return handleList(req, user);
     }
 
     return new Response('Not found', { status: 404 });
@@ -287,6 +293,12 @@ async function handleDeletePost(postId: string): Promise<Response> {
       .eq('post_id', postId);
     if (delCommentsErr) throw delCommentsErr;
 
+    const { error: delLikesErr } = await supabase
+      .from('post_likes')
+      .delete()
+      .eq('post_id', postId);
+    if (delLikesErr) console.error('Failed to remove post_likes:', delLikesErr);
+
     const { error: delPostErr } = await supabase
       .from('posts')
       .delete()
@@ -303,6 +315,71 @@ async function handleDeletePost(postId: string): Promise<Response> {
     if (error) throw error;
     return Response.json({ ok: true, permanent: false });
   }
+}
+
+async function handleToggleLike(postId: string, user: any): Promise<Response> {
+  const { data: existing, error: getErr } = await supabase
+    .from('post_likes')
+    .select('post_id')
+    .eq('post_id', postId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (getErr) throw getErr;
+
+  let liked = false;
+  if (existing) {
+    // Unlike
+    const { error: delErr } = await supabase
+      .from('post_likes')
+      .delete()
+      .eq('post_id', postId)
+      .eq('user_id', user.id);
+    if (delErr) throw delErr;
+    liked = false;
+  } else {
+    // Like
+    const name = authorName(user);
+    const { error: insErr } = await supabase
+      .from('post_likes')
+      .insert({
+        post_id: postId,
+        user_id: user.id,
+        author: name,
+      });
+    if (insErr) throw insErr;
+    liked = true;
+
+    // Send push notification to post author if it's the partner
+    try {
+      const { data: post } = await supabase
+        .from('posts')
+        .select('author')
+        .eq('id', postId)
+        .single();
+      if (post && post.author !== name) {
+        const people = await allUsers(user);
+        const partner = people.find((p) => p.id !== user.id);
+        if (partner) {
+          await sendPushToUser(
+            partner.id,
+            `${name} liked your moment`,
+            'Open Moments to see it.',
+            '/'
+          );
+        }
+      }
+    } catch (e) {
+      console.error('Failed to send like push notification:', e);
+    }
+  }
+
+  const { count, error: countErr } = await supabase
+    .from('post_likes')
+    .select('*', { count: 'exact', head: true })
+    .eq('post_id', postId);
+  if (countErr) throw countErr;
+
+  return Response.json({ ok: true, liked, like_count: count ?? 0 });
 }
 
 async function handleComments(postId: string): Promise<Response> {
@@ -392,7 +469,7 @@ async function sendPushToUser(userId: string, title: string, body: string, url =
   }
 }
 
-async function handleList(req: Request): Promise<Response> {
+async function handleList(req: Request, user?: any): Promise<Response> {
   const url = new URL(req.url);
   const statusParam = url.searchParams.get('status');
   const limitParam = url.searchParams.get('limit');
@@ -402,7 +479,7 @@ async function handleList(req: Request): Promise<Response> {
 
   let query = supabase
     .from('posts')
-    .select('id, caption, author, created_at, status, location, lat, lng, mentions, post_media(id, object_key, mime_type, sort_order)')
+    .select('id, caption, author, created_at, status, location, lat, lng, mentions, post_media(id, object_key, mime_type, sort_order), post_likes(user_id, author)')
     .order('created_at', { ascending: false })
     .limit(pageSize);
 
@@ -419,13 +496,20 @@ async function handleList(req: Request): Promise<Response> {
   const { data, error } = await query;
   if (error) throw error;
 
-  const rows = (data ?? []).map((post) => ({
-    ...post,
-    post_media: (post.post_media ?? []).map((m) => ({
-      ...m,
-      url: `https://wmouyojmcelxgkwjfpxz.supabase.co/storage/v1/object/public/moments/${m.object_key}`,
-    })),
-  }));
+  const rows = (data ?? []).map((post) => {
+    const postLikes = (post as any).post_likes ?? [];
+    const likedByMe = user ? postLikes.some((l: any) => l.user_id === user.id) : false;
+    return {
+      ...post,
+      liked_by_me: likedByMe,
+      like_count: postLikes.length,
+      likes: postLikes,
+      post_media: (post.post_media ?? []).map((m: any) => ({
+        ...m,
+        url: `https://wmouyojmcelxgkwjfpxz.supabase.co/storage/v1/object/public/moments/${m.object_key}`,
+      })),
+    };
+  });
   return Response.json(rows, {
     headers: {
       'Cache-Control': 'private, no-cache',

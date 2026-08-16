@@ -585,6 +585,7 @@
       onClose={closePost}
       onDelete={handleDeletePost}
       onRestore={handleRestorePost}
+      onShowOnMap={handleShowOnMap}
     />
   {/if}
 
