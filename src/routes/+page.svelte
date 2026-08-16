@@ -2,14 +2,12 @@
   import { onMount } from "svelte";
   import PostViewer from "$lib/PostViewer.svelte";
   import MapTimeline from "$lib/MapTimeline.svelte";
-  import { fetchPosts, formatDate, formatDateTime, purgePost, restorePost, type Post } from "$lib/api";
+  import { fetchPosts, getCachedPosts, formatDate, formatDateTime, purgePost, restorePost, type Post } from "$lib/api";
   import { session, initSession, signOut } from "$lib/session.svelte";
   import { initPushNotifications } from "$lib/push";
 
   let posts = $state<Post[]>([]);
   let loading = $state(true);
-  let loadingMore = $state(false);
-  let hasMore = $state(true);
   let error = $state(false);
   let activePost = $state<Post | null>(null);
   let focusedPostId = $state<string | null>(null);
@@ -26,7 +24,7 @@
 
   let countText = $derived(
     posts.length
-      ? `${posts.length}${hasMore ? "+" : ""} moment${posts.length > 1 ? "s" : ""}`
+      ? `${posts.length} moment${posts.length > 1 ? "s" : ""}`
       : "",
   );
 
@@ -43,51 +41,61 @@
     initPushNotifications();
   });
 
-  // IntersectionObserver to sync the background map camera and trigger infinite scroll pagination
-  function setupObserver(node: HTMLElement) {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const id = entry.target.getAttribute("data-post-id");
-            if (id) {
-              focusedPostId = id;
-              const index = posts.findIndex((p) => p.id === id);
-              if (posts.length >= 20 && index >= posts.length - 3 && hasMore && !loadingMore && !loading) {
-                loadMore();
-              }
-            }
-          }
-        });
-      },
-      {
-        root: node,
-        threshold: 0.5,
-      },
-    );
+  // IntersectionObserver to sync the background map camera with the currently centered slide
+  function setupObserver(node: HTMLElement, _postsList: Post[]) {
+    let observer: IntersectionObserver | null = null;
 
-    const slides = node.querySelectorAll(".snap-slide");
-    slides.forEach((s) => observer.observe(s));
+    function attach() {
+      if (observer) observer.disconnect();
+      observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              const id = entry.target.getAttribute("data-post-id");
+              if (id) focusedPostId = id;
+            }
+          });
+        },
+        {
+          root: node,
+          threshold: 0.5,
+        },
+      );
+
+      const slides = node.querySelectorAll(".snap-slide");
+      slides.forEach((s) => observer?.observe(s));
+    }
+
+    attach();
 
     return {
-      update() {
-        observer.disconnect();
-        const currentSlides = node.querySelectorAll(".snap-slide");
-        currentSlides.forEach((s) => observer.observe(s));
+      update(_newPosts: Post[]) {
+        attach();
       },
       destroy() {
-        observer.disconnect();
+        if (observer) observer.disconnect();
       },
     };
   }
 
   async function load(silent = false) {
-    if (!silent) loading = true;
+    // 1. Instant Cache-first render
+    if (!silent && posts.length === 0) {
+      const cached = getCachedPosts();
+      if (cached && cached.length > 0) {
+        posts = cached;
+        focusedPostId = cached[0].id;
+        loading = false;
+      }
+    }
+
+    if (!silent && posts.length === 0) loading = true;
     error = false;
+
+    // 2. Background network fetch
     try {
-      const data = await fetchPosts({ limit: 20 });
+      const data = await fetchPosts();
       posts = data;
-      hasMore = data.length >= 20;
       if (posts.length > 0 && !focusedPostId) {
         focusedPostId = posts[0].id;
       }
@@ -96,31 +104,10 @@
         await signOutAndReset();
         return;
       }
-      if (!silent) error = true;
+      // If we don't even have cached posts, display error
+      if (posts.length === 0 && !silent) error = true;
     } finally {
       loading = false;
-    }
-  }
-
-  async function loadMore() {
-    if (loadingMore || !hasMore || posts.length === 0) return;
-    loadingMore = true;
-    try {
-      const lastPost = posts[posts.length - 1];
-      const older = await fetchPosts({ limit: 20, before: lastPost.created_at });
-      if (older.length < 20) {
-        hasMore = false;
-      }
-      if (older.length > 0) {
-        // Append without duplicating IDs
-        const existing = new Set(posts.map((p) => p.id));
-        const unique = older.filter((p) => !existing.has(p.id));
-        posts = [...posts, ...unique];
-      }
-    } catch {
-      // Silently catch pagination errors
-    } finally {
-      loadingMore = false;
     }
   }
 
@@ -362,7 +349,7 @@
       </div>
     {:else}
       <div class="snap-feed-wrapper">
-        <div class="snap-feed" use:setupObserver>
+        <div class="snap-feed" use:setupObserver={posts}>
           {#each posts as post (post.id)}
             <section
               class="snap-slide"

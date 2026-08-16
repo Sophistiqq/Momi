@@ -395,10 +395,10 @@ async function sendPushToUser(userId: string, title: string, body: string, url =
 async function handleList(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const statusParam = url.searchParams.get('status');
-  const limitParam = parseInt(url.searchParams.get('limit') || '30', 10);
+  const limitParam = url.searchParams.get('limit');
   const beforeParam = url.searchParams.get('before');
 
-  const pageSize = Math.min(Math.max(limitParam || 30, 1), 50);
+  const pageSize = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 50, 1), 200) : 500;
 
   let query = supabase
     .from('posts')

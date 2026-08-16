@@ -30,22 +30,32 @@ export interface Comment {
   created_at: string;
 }
 
-export async function fetchPosts(options?: { status?: string; limit?: number; before?: string } | string): Promise<Post[]> {
-  let url = '/share-target/posts';
-  const params = new URLSearchParams();
-  if (typeof options === 'string') {
-    params.set('status', options);
-  } else if (options) {
-    if (options.status) params.set('status', options.status);
-    if (options.limit) params.set('limit', String(options.limit));
-    if (options.before) params.set('before', options.before);
-  }
-  const qs = params.toString();
-  if (qs) url += `?${qs}`;
+const POSTS_CACHE_KEY = 'momi-posts-cache-v1';
 
+export function getCachedPosts(): Post[] {
+  try {
+    const raw = localStorage.getItem(POSTS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setCachedPosts(posts: Post[]): void {
+  try {
+    localStorage.setItem(POSTS_CACHE_KEY, JSON.stringify(posts));
+  } catch {}
+}
+
+export async function fetchPosts(status?: string): Promise<Post[]> {
+  const url = status ? `/share-target/posts?status=${status}` : '/share-target/posts';
   const res = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(String(res.status));
-  return res.json();
+  const data = await res.json();
+  if (!status || status !== 'trash') {
+    setCachedPosts(data);
+  }
+  return data;
 }
 
 export interface People {
