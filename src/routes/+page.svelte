@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import PostViewer from "$lib/PostViewer.svelte";
   import MapTimeline from "$lib/MapTimeline.svelte";
+  import SocialTimeline from "$lib/SocialTimeline.svelte";
   import { fetchPosts, getCachedPosts, formatDate, formatDateTime, purgePost, restorePost, type Post } from "$lib/api";
   import { session, initSession, signOut } from "$lib/session.svelte";
   import { initPushNotifications } from "$lib/push";
@@ -13,6 +14,7 @@
   let focusedPostId = $state<string | null>(null);
   let showConnectors = $state(false);
   let showScrubber = $state(true);
+  let activeTab = $state<"map" | "timeline">("map");
 
   // Trash overlay state
   let showTrash = $state(false);
@@ -237,6 +239,12 @@
     if (history.state?.viewer) history.back();
   }
 
+  function handleShowOnMap(post: Post): void {
+    activeTab = "map";
+    // Small delay to let the map tab render before scrolling the post into view
+    setTimeout(() => focusPost(post, "auto"), 50);
+  }
+
   async function signOutAndReset(): Promise<void> {
     await signOut();
     posts = [];
@@ -248,12 +256,14 @@
   <title>Moments</title>
 </svelte:head>
 
-<MapTimeline
-  {posts}
-  activePostId={focusedPostId}
-  {showConnectors}
-  onSelectPost={(post) => focusPost(post)}
-/>
+{#if activeTab === "map"}
+  <MapTimeline
+    {posts}
+    activePostId={focusedPostId}
+    {showConnectors}
+    onSelectPost={(post) => focusPost(post)}
+  />
+{/if}
 
 {#if !session.ready}
   <div class="state show">
@@ -368,7 +378,43 @@
     </div>
   </header>
 
-  <main>
+  <!-- Floating view-switcher tab bar -->
+  <div class="view-switcher-bar">
+    <div class="view-switcher" role="tablist" aria-label="View mode">
+      <button
+        class="vs-tab"
+        class:vs-active={activeTab === "map"}
+        role="tab"
+        aria-selected={activeTab === "map"}
+        onclick={() => (activeTab = "map")}
+        id="tab-map"
+      >
+        <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="2 5 7 2.5 13 5 18 2.5 18 15.5 13 18 7 15.5 2 18"/>
+          <line x1="7" y1="2.5" x2="7" y2="15.5"/>
+          <line x1="13" y1="5" x2="13" y2="18"/>
+        </svg>
+        Map
+      </button>
+      <button
+        class="vs-tab"
+        class:vs-active={activeTab === "timeline"}
+        role="tab"
+        aria-selected={activeTab === "timeline"}
+        onclick={() => (activeTab = "timeline")}
+        id="tab-timeline"
+      >
+        <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2" y="3" width="16" height="5" rx="1.5"/>
+          <rect x="2" y="10.5" width="10" height="3.5" rx="1.5"/>
+          <rect x="2" y="16" width="7" height="2" rx="1"/>
+        </svg>
+        Timeline
+      </button>
+    </div>
+  </div>
+
+  <main class:timeline-main={activeTab === "timeline"}>
     {#if loading}
       <div class="snap-feed-wrapper" role="status" aria-label="Loading moments">
         <div class="snap-feed" style="overflow-x: hidden;">
@@ -403,125 +449,135 @@
         <p>Share a photo or video from your gallery — it&rsquo;ll land right here.</p>
       </div>
     {:else}
-      <!-- Left side vertical scrubber slider -->
-      {#if showScrubber && posts.length > 1}
-        <aside
-          class="timeline-scrubber-wrapper"
-          class:active={scrubberActive}
-          aria-label="Timeline Scrubber"
-        >
-          <div
-            class="scrubber-capsule"
-            bind:this={scrubberTrackEl}
-            role="slider"
-            tabindex="0"
-            aria-valuemin="0"
-            aria-valuemax={posts.length - 1}
-            aria-valuenow={focusedIndex}
-            aria-valuetext={`Moment ${focusedIndex + 1} of ${posts.length}`}
-            ontouchstart={(e) => {
-              scrubberActive = true;
-              handleScrubberTouch(e.touches[0].clientY);
-            }}
-            ontouchmove={(e) => {
-              if (scrubberActive) handleScrubberTouch(e.touches[0].clientY);
-            }}
-            ontouchend={() => (scrubberActive = false)}
-            onmousedown={(e) => {
-              scrubberActive = true;
-              handleScrubberTouch(e.clientY);
-              const onMove = (ev: MouseEvent) => handleScrubberTouch(ev.clientY);
-              const onUp = () => {
-                scrubberActive = false;
-                window.removeEventListener("mousemove", onMove);
-                window.removeEventListener("mouseup", onUp);
-              };
-              window.addEventListener("mousemove", onMove);
-              window.addEventListener("mouseup", onUp);
-            }}
+      {#if activeTab === "map"}
+        <!-- Left side vertical scrubber slider -->
+        {#if showScrubber && posts.length > 1}
+          <aside
+            class="timeline-scrubber-wrapper"
+            class:active={scrubberActive}
+            aria-label="Timeline Scrubber"
           >
-            <!-- Notch ticks inside capsule -->
-            <div class="scrubber-ticks" aria-hidden="true">
-              <span class="scrubber-tick major"></span>
-              <span class="scrubber-tick"></span>
-              <span class="scrubber-tick"></span>
-              <span class="scrubber-tick major"></span>
-              <span class="scrubber-tick"></span>
-              <span class="scrubber-tick"></span>
-              <span class="scrubber-tick major"></span>
-            </div>
-
-            <div class="scrubber-track">
-              <div class="scrubber-progress" style="height: {scrubberPercent}%;"></div>
-            </div>
-
             <div
-              class="scrubber-thumb"
-              style="top: {scrubberPercent}%;"
+              class="scrubber-capsule"
+              bind:this={scrubberTrackEl}
+              role="slider"
+              tabindex="0"
+              aria-valuemin="0"
+              aria-valuemax={posts.length - 1}
+              aria-valuenow={focusedIndex}
+              aria-valuetext={`Moment ${focusedIndex + 1} of ${posts.length}`}
+              ontouchstart={(e) => {
+                scrubberActive = true;
+                handleScrubberTouch(e.touches[0].clientY);
+              }}
+              ontouchmove={(e) => {
+                if (scrubberActive) handleScrubberTouch(e.touches[0].clientY);
+              }}
+              ontouchend={() => (scrubberActive = false)}
+              onmousedown={(e) => {
+                scrubberActive = true;
+                handleScrubberTouch(e.clientY);
+                const onMove = (ev: MouseEvent) => handleScrubberTouch(ev.clientY);
+                const onUp = () => {
+                  scrubberActive = false;
+                  window.removeEventListener("mousemove", onMove);
+                  window.removeEventListener("mouseup", onUp);
+                };
+                window.addEventListener("mousemove", onMove);
+                window.addEventListener("mouseup", onUp);
+              }}
             >
-              <span class="scrubber-thumb-dot"></span>
-              <div class="scrubber-bubble">
-                <span class="bubble-num">{focusedIndex + 1}</span>
-                <span class="bubble-total">/{posts.length}</span>
-                {#if posts[focusedIndex]}
-                  <span class="bubble-date">{formatDate(posts[focusedIndex].created_at)}</span>
-                {/if}
+              <!-- Notch ticks inside capsule -->
+              <div class="scrubber-ticks" aria-hidden="true">
+                <span class="scrubber-tick major"></span>
+                <span class="scrubber-tick"></span>
+                <span class="scrubber-tick"></span>
+                <span class="scrubber-tick major"></span>
+                <span class="scrubber-tick"></span>
+                <span class="scrubber-tick"></span>
+                <span class="scrubber-tick major"></span>
+              </div>
+
+              <div class="scrubber-track">
+                <div class="scrubber-progress" style="height: {scrubberPercent}%;"></div>
+              </div>
+
+              <div
+                class="scrubber-thumb"
+                style="top: {scrubberPercent}%;"
+              >
+                <span class="scrubber-thumb-dot"></span>
+                <div class="scrubber-bubble">
+                  <span class="bubble-num">{focusedIndex + 1}</span>
+                  <span class="bubble-total">/{posts.length}</span>
+                  {#if posts[focusedIndex]}
+                    <span class="bubble-date">{formatDate(posts[focusedIndex].created_at)}</span>
+                  {/if}
+                </div>
               </div>
             </div>
-          </div>
-        </aside>
-      {/if}
+          </aside>
+        {/if}
 
-      <div class="snap-feed-wrapper">
-        <div class="snap-feed" use:setupObserver={posts}>
-          {#each posts as post (post.id)}
-            <section
-              class="snap-slide"
-              data-post-id={post.id}
-            >
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-              <div
-                class="slide-hud"
-                class:focused={post.id === focusedPostId}
-                onclick={() => openPost(post)}
-                role="button"
-                tabindex="0"
+        <div class="snap-feed-wrapper">
+          <div class="snap-feed" use:setupObserver={posts}>
+            {#each posts as post (post.id)}
+              <section
+                class="snap-slide"
+                data-post-id={post.id}
               >
-                <div class="hud-top">
-                  <div class="hud-candy-badge">
-                    <span class="hud-candy-dot"></span>
-                    {#if (post.post_media?.length || 0) > 0}
-                      <span>{post.post_media.length} {post.post_media.length === 1 ? 'item' : 'items'}</span>
-                    {/if}
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+                <div
+                  class="slide-hud"
+                  class:focused={post.id === focusedPostId}
+                  onclick={() => openPost(post)}
+                  role="button"
+                  tabindex="0"
+                >
+                  <div class="hud-top">
+                    <div class="hud-candy-badge">
+                      <span class="hud-candy-dot"></span>
+                      {#if (post.post_media?.length || 0) > 0}
+                        <span>{post.post_media.length} {post.post_media.length === 1 ? 'item' : 'items'}</span>
+                      {/if}
+                    </div>
+                    <span class="hud-time">
+                      {new Date(post.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                    </span>
                   </div>
-                  <span class="hud-time">
-                    {new Date(post.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                  </span>
-                </div>
 
-                {#if post.caption}
-                  <p class="hud-caption">
-                    {post.caption.length > 150 ? post.caption.slice(0, 150) + "…" : post.caption}
-                  </p>
-                {/if}
+                  {#if post.caption}
+                    <p class="hud-caption">
+                      {post.caption.length > 150 ? post.caption.slice(0, 150) + "…" : post.caption}
+                    </p>
+                  {/if}
 
-                <div class="hud-bottom">
-                  <time class="hud-date" datetime={post.created_at}>
-                    {formatDate(post.created_at)}
-                  </time>
-                  <div class="hud-tap-pill">
-                    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
-                      <path d="M6 3.5l4.5 4.5-4.5 4.5" />
-                    </svg>
+                  <div class="hud-bottom">
+                    <time class="hud-date" datetime={post.created_at}>
+                      {formatDate(post.created_at)}
+                    </time>
+                    <div class="hud-tap-pill">
+                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M6 3.5l4.5 4.5-4.5 4.5" />
+                      </svg>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </section>
-          {/each}
+              </section>
+            {/each}
+          </div>
         </div>
-      </div>
+      {:else}
+        <!-- Social timeline view -->
+        <SocialTimeline
+          {posts}
+          onOpenPost={openPost}
+          onShowOnMap={handleShowOnMap}
+        />
+      {/if}
     {/if}
   </main>
+
 
   {#if activePost}
     <PostViewer
