@@ -11,4 +11,6 @@ COPY --from=build /app/build ./build
 COPY --from=build /app/node_modules ./node_modules
 COPY package.json ./
 EXPOSE 3000
+ENV BODY_SIZE_LIMIT=100M
+ENV PORT=3000
 CMD ["bun", "./build/index.js"]
