@@ -1,9 +1,9 @@
-import adapter from '@sveltejs/adapter-static';
+import adapter from '@sveltejs/adapter-node';
 import type { Config } from '@sveltejs/kit';
 
 const config: Config = {
   kit: {
-    adapter: adapter({ fallback: 'index.html' }),
+    adapter: adapter(),
   },
 };
 

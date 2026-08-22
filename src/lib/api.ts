@@ -7,6 +7,7 @@ export interface Media {
   mime_type: string;
   sort_order: number;
   url: string;
+  placeholder?: string | null;
 }
 
 export interface Post {
