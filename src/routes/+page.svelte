@@ -1,19 +1,16 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { pushState } from "$app/navigation";
-  import PostViewer from "$lib/PostViewer.svelte";
   import MapTimeline from "$lib/MapTimeline.svelte";
   import SocialTimeline from "$lib/SocialTimeline.svelte";
   import {
     fetchPosts,
-    fetchComments,
     getCachedPosts,
     formatDate,
     formatDateTime,
     purgePost,
     restorePost,
     type Post,
-    type Comment,
   } from "$lib/api";
   import { session, initSession, signOut } from "$lib/session.svelte";
   import { initPushNotifications } from "$lib/push";
@@ -21,7 +18,6 @@
   let posts = $state<Post[]>([]);
   let loading = $state(true);
   let error = $state(false);
-  let activePost = $state<Post | null>(null);
   let focusedPostId = $state<string | null>(null);
   let showConnectors = $state(false);
   let showScrubber = $state(true);
@@ -42,45 +38,13 @@
   let restoringId = $state<string | null>(null);
   let confirmPurgeId = $state<string | null>(null);
 
-  // --- Page-level comments cache (feeds PostViewer to avoid a fetch on open) ---
-  let commentsCache = $state<Record<string, Comment[]>>({});
-  const commentsCachePrefetching = new Set<string>();
-
-  async function prefetchPostComments(postId: string) {
-    if (
-      commentsCache[postId] !== undefined ||
-      commentsCachePrefetching.has(postId)
-    )
-      return;
-    const post = posts.find((p) => p.id === postId);
-    const knownCount = post?.comment_count ?? post?.comments_count ?? -1;
-    if (knownCount === 0) {
-      commentsCache[postId] = [];
-      return;
-    }
-    commentsCachePrefetching.add(postId);
-    try {
-      commentsCache[postId] = await fetchComments(postId);
-    } catch {
-      // Silent — PostViewer will fall back to fetching itself.
-    } finally {
-      commentsCachePrefetching.delete(postId);
-    }
-  }
-
-  // Warm up comments whenever the focused post changes (covers both map swipe and timeline scroll).
-  $effect(() => {
-    if (focusedPostId) prefetchPostComments(focusedPostId);
-  });
-
   let countText = $derived(
     posts.length ? `${posts.length} moment${posts.length > 1 ? "s" : ""}` : "",
   );
 
   onMount(() => {
     window.addEventListener("popstate", () => {
-      if (activePost) activePost = null;
-      else if (showTrash) showTrash = false;
+      if (showTrash) showTrash = false;
     });
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") load(true);
@@ -228,10 +192,6 @@
     posts = posts.filter((p) => p.id !== postId);
   }
 
-  function handleRestorePost(postId: string) {
-    posts = posts.filter((p) => p.id !== postId);
-  }
-
   let scrubberActive = $state(false);
   let scrubberTrackEl = $state<HTMLDivElement | undefined>();
 
@@ -328,32 +288,6 @@
     });
   }
 
-  function openPost(post: Post): void {
-    const apply = () => {
-      focusedPostId = post.id;
-      activePost = post;
-    };
-    if (document.startViewTransition) {
-      document.startViewTransition(apply);
-    } else {
-      apply();
-    }
-    pushState("", { viewer: true });
-  }
-
-  function closePost(): void {
-    if (!activePost) return;
-    const apply = () => {
-      activePost = null;
-    };
-    if (document.startViewTransition) {
-      document.startViewTransition(apply);
-    } else {
-      apply();
-    }
-    if (history.state?.viewer) history.back();
-  }
-
   let timelineScrollY = $state(0);
 
   function switchTab(newTab: "map" | "timeline"): void {
@@ -400,7 +334,6 @@
   async function signOutAndReset(): Promise<void> {
     await signOut();
     posts = [];
-    activePost = null;
   }
 </script>
 
@@ -845,14 +778,7 @@
         <div class="snap-feed" use:setupObserver={visiblePosts}>
           {#each visiblePosts as post (post.id)}
             <section class="snap-slide" data-post-id={post.id}>
-              <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-              <div
-                class="slide-hud"
-                class:focused={post.id === focusedPostId}
-                onclick={() => openPost(post)}
-                role="button"
-                tabindex="0"
-              >
+              <div class="slide-hud" class:focused={post.id === focusedPostId}>
                 <div class="hud-top">
                   <div class="hud-candy-badge">
                     <span class="hud-candy-dot"></span>
@@ -910,7 +836,7 @@
       <SocialTimeline
         posts={visiblePosts}
         {focusedPostId}
-        onOpenPost={openPost}
+        onDelete={handleDeletePost}
         onShowOnMap={handleShowOnMap}
         onFocusPost={(id) => (focusedPostId = id)}
       />
@@ -924,17 +850,6 @@
       {/if}
     {/if}
   </main>
-
-  {#if activePost}
-    <PostViewer
-      post={activePost}
-      initialComments={commentsCache[activePost.id]}
-      onClose={closePost}
-      onDelete={handleDeletePost}
-      onRestore={handleRestorePost}
-      onShowOnMap={handleShowOnMap}
-    />
-  {/if}
 
   <!-- ---- Trash Overlay ---- -->
   {#if showTrash}

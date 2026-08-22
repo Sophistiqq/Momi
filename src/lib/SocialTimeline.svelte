@@ -2,6 +2,8 @@
   import {
     fetchComments,
     addComment,
+    updatePost,
+    deletePost,
     toggleLike as apiToggleLike,
     formatDate,
     formatDateTime,
@@ -12,12 +14,12 @@
   interface Props {
     posts: Post[];
     focusedPostId?: string | null;
-    onOpenPost: (post: Post) => void;
+    onDelete?: (id: string) => void;
     onShowOnMap: (post: Post) => void;
     onFocusPost?: (id: string) => void;
   }
 
-  let { posts, focusedPostId, onOpenPost, onShowOnMap, onFocusPost }: Props = $props();
+  let { posts, focusedPostId, onDelete, onShowOnMap, onFocusPost }: Props = $props();
 
   // Plain reactive maps for item states to prevent Svelte 5 unsafe state mutation during template evaluation
   let likedMap = $state<Record<string, boolean>>({});
@@ -28,6 +30,96 @@
   let newCommentMap = $state<Record<string, string>>({});
   let commentingMap = $state<Record<string, boolean>>({});
   let heartBurstId = $state<string | null>(null);
+
+  // Media carousel state per card
+  let mediaIndexMap = $state<Record<string, number>>({});
+  let videoPausedMap = $state<Record<string, boolean>>({});
+
+  // Caption/location editing state per card
+  let editingMap = $state<Record<string, boolean>>({});
+  let captionDraftMap = $state<Record<string, string>>({});
+  let locationDraftMap = $state<Record<string, string>>({});
+
+  // Non-reactive: gesture tracking + imperative video refs.
+  const touchStartXByPost = new Map<string, number>();
+  const videoRefs: Record<string, HTMLVideoElement | undefined> = {};
+  const vidKey = (postId: string, i: number) => `${postId}:${i}`;
+
+  // Only one video plays at a time across the whole feed.
+  $effect(() => {
+    const onPlay = (e: Event) => {
+      const v = e.target as HTMLVideoElement;
+      if (!(v instanceof HTMLVideoElement)) return;
+      document.querySelectorAll("video").forEach((o) => {
+        if (o !== v) o.pause();
+      });
+    };
+    document.addEventListener("play", onPlay, true);
+    return () => document.removeEventListener("play", onPlay, true);
+  });
+
+  function goToMedia(postId: string, count: number, i: number): void {
+    const next = Math.max(0, Math.min(count - 1, i));
+    if (next === (mediaIndexMap[postId] ?? 0)) return;
+    mediaIndexMap[postId] = next;
+    for (let s = 0; s < count; s++) {
+      if (s !== next) videoRefs[vidKey(postId, s)]?.pause();
+    }
+  }
+
+  function swipeMedia(postId: string, count: number, dx: number): void {
+    if (Math.abs(dx) < 40) return;
+    goToMedia(postId, count, (mediaIndexMap[postId] ?? 0) + (dx < 0 ? 1 : -1));
+  }
+
+  function onMediaTouchStart(postId: string, e: TouchEvent): void {
+    touchStartXByPost.set(postId, e.touches[0].clientX);
+  }
+
+  function onMediaTouchEnd(postId: string, count: number, e: TouchEvent): void {
+    const startX = touchStartXByPost.get(postId);
+    if (startX === undefined) return;
+    swipeMedia(postId, count, e.changedTouches[0].clientX - startX);
+  }
+
+  function toggleVideoPlay(postId: string, i: number, e: Event): void {
+    e.stopPropagation();
+    const vel = videoRefs[vidKey(postId, i)];
+    if (!vel) return;
+    if (vel.paused) vel.play().catch(() => {});
+    else vel.pause();
+  }
+
+  function startEditPost(post: Post): void {
+    captionDraftMap[post.id] = post.caption || "";
+    locationDraftMap[post.id] = post.location || "";
+    editingMap[post.id] = true;
+  }
+
+  async function submitPostEdit(post: Post): Promise<void> {
+    const caption = (captionDraftMap[post.id] ?? "").trim();
+    const location = (locationDraftMap[post.id] ?? "").trim();
+    const changedLocation = location !== post.location;
+    const ok = await updatePost(post.id, {
+      caption,
+      location,
+      lat: changedLocation ? null : undefined,
+      lng: changedLocation ? null : undefined,
+    });
+    if (ok) {
+      post.caption = caption;
+      post.location = location;
+      if (changedLocation) {
+        post.lat = null;
+        post.lng = null;
+      }
+    }
+    editingMap[post.id] = false;
+  }
+
+  async function moveToTrash(postId: string): Promise<void> {
+    if (await deletePost(postId)) onDelete?.(postId);
+  }
 
   // Non-reactive: only used as a control-flow guard, never drives rendering.
   const prefetching = new Set<string>();
@@ -235,7 +327,6 @@
       {@const commentsLoading = commentsLoadingMap[post.id] ?? false}
       {@const isCommenting = commentingMap[post.id] ?? false}
       {@const media = post.post_media ?? []}
-      {@const thumb = media.find((m) => !m.mime_type?.startsWith("video")) ?? media[0]}
       <article
         class="stl-card"
         style="animation-delay: {Math.min(idx, 8) * 40}ms"
@@ -260,46 +351,150 @@
           <time class="stl-time" datetime={post.created_at}>
             {relativeTime(post.created_at)}
           </time>
+          <div class="stl-head-actions">
+            <button
+              class="stl-menu-btn"
+              popovertarget={`post-menu-${post.id}`}
+              aria-label="Post options"
+            >
+              <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
+                <circle cx="3" cy="8" r="1.6"/>
+                <circle cx="8" cy="8" r="1.6"/>
+                <circle cx="13" cy="8" r="1.6"/>
+              </svg>
+            </button>
+            <div class="menu-list" id={`post-menu-${post.id}`} popover>
+              <button
+                popovertarget={`post-menu-${post.id}`}
+                popovertargetaction="hide"
+                onclick={() => startEditPost(post)}
+              >
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 2l3 3L5 14H2v-3L11 2z"/>
+                </svg>
+                Edit caption
+              </button>
+              <button
+                popovertarget={`post-menu-${post.id}`}
+                popovertargetaction="hide"
+                onclick={() => moveToTrash(post.id)}
+                style="color: var(--danger);"
+              >
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 4h10M6 4V2.5h4V4M5 4v9h6V4"/>
+                </svg>
+                Move to Trash
+              </button>
+            </div>
+          </div>
         </header>
 
-        <!-- Media -->
+        <!-- Media carousel -->
         {#if media.length > 0}
+          {@const mi = mediaIndexMap[post.id] ?? 0}
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
           <div
             class="stl-media-wrap"
-            onclick={() => onOpenPost(post)}
-            role="button"
-            tabindex="0"
-            aria-label="Open post"
+            role="region"
+            aria-label="Post media"
+            ontouchstart={(e) => onMediaTouchStart(post.id, e)}
+            ontouchend={(e) => onMediaTouchEnd(post.id, media.length, e)}
           >
-            {#if thumb?.mime_type?.startsWith("video")}
-              <div class="stl-media-video-thumb">
-                <!-- svelte-ignore a11y_media_has_caption -->
-                <video src={thumb.url} preload="none" muted playsinline class="stl-media"></video>
-                <div class="stl-play-badge" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" width="22" height="22" fill="currentColor">
-                    <path d="M5 3.5l9 4.5-9 4.5V3.5z"/>
-                  </svg>
+            <div class="stl-strip" style="transform: translateX(-{mi * 100}%)">
+              {#each media as m, i (m.id)}
+                <div class="stl-slide">
+                  {#if m.mime_type?.startsWith("video")}
+                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+                    <div
+                      class="stl-video-container"
+                      role="button"
+                      tabindex="0"
+                      aria-label={(videoPausedMap[vidKey(post.id, i)] ?? true) ? "Play video" : "Pause video"}
+                      onclick={(e) => toggleVideoPlay(post.id, i, e)}
+                    >
+                      <!-- svelte-ignore a11y_media_has_caption -->
+                      <video
+                        bind:this={videoRefs[vidKey(post.id, i)]}
+                        src={m.url}
+                        playsinline
+                        loop
+                        preload={i === 0 ? "auto" : "metadata"}
+                        onplay={() => (videoPausedMap[vidKey(post.id, i)] = false)}
+                        onpause={(e) => {
+                          const v = e.currentTarget;
+                          if (v && v.seeking) return;
+                          videoPausedMap[vidKey(post.id, i)] = true;
+                        }}
+                      ></video>
+                      {#if i === mi && (videoPausedMap[vidKey(post.id, i)] ?? true)}
+                        <div class="stl-play-badge" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
+                            <path d="M8 5v14l11-7z"/>
+                          </svg>
+                        </div>
+                      {/if}
+                    </div>
+                  {:else}
+                    <img
+                      class="stl-media"
+                      src={m.url}
+                      alt={post.caption ?? ""}
+                      loading="lazy"
+                      decoding="async"
+                      fetchpriority={i === 0 && idx < 2 ? "high" : "low"}
+                    />
+                  {/if}
                 </div>
-              </div>
-            {:else}
-              <img
-                class="stl-media"
-                src={thumb.url}
-                alt={post.caption ?? ""}
-                loading="lazy"
-                decoding="async"
-                fetchpriority={idx < 2 ? "high" : "low"}
-              />
-            {/if}
+              {/each}
+            </div>
 
             {#if media.length > 1}
               <div class="stl-media-count" aria-label="{media.length} items">
-                <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true">
-                  <rect x="1" y="4" width="10" height="10" rx="1.5"/>
-                  <rect x="5" y="1" width="10" height="10" rx="1.5" fill-opacity="0.5"/>
-                </svg>
-                {media.length}
+                {mi + 1} / {media.length}
+              </div>
+
+              <div class="stl-media-nav">
+                <button
+                  type="button"
+                  class="stl-btn-nav"
+                  disabled={mi === 0}
+                  aria-label="Previous image"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    goToMedia(post.id, media.length, mi - 1);
+                  }}
+                >
+                  <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 2.5L4 8l6 5.5"/>
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="stl-btn-nav"
+                  disabled={mi === media.length - 1}
+                  aria-label="Next image"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    goToMedia(post.id, media.length, mi + 1);
+                  }}
+                >
+                  <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 2.5L12 8l-6 5.5"/>
+                  </svg>
+                </button>
+              </div>
+
+              <div class="stl-dots">
+                {#each media as m, i (m.id)}
+                  <button
+                    class:active={i === mi}
+                    aria-label={`Jump to slide ${i + 1}`}
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      goToMedia(post.id, media.length, i);
+                    }}
+                  ></button>
+                {/each}
               </div>
             {/if}
 
@@ -314,9 +509,27 @@
         {/if}
 
         <!-- Caption -->
-        {#if post.caption}
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-          <div class="stl-caption" role="button" tabindex="0" onclick={() => onOpenPost(post)}>
+        {#if editingMap[post.id]}
+          <div class="stl-edit-form">
+            <textarea
+              class="input"
+              rows={3}
+              placeholder="Write a caption…"
+              bind:value={captionDraftMap[post.id]}
+            ></textarea>
+            <input
+              class="input"
+              placeholder="Add or update location…"
+              style="margin-top: 8px;"
+              bind:value={locationDraftMap[post.id]}
+            />
+            <div class="stl-edit-actions">
+              <button class="btn btn-ghost" onclick={() => (editingMap[post.id] = false)}>Cancel</button>
+              <button class="btn btn-primary" onclick={() => submitPostEdit(post)}>Save</button>
+            </div>
+          </div>
+        {:else if post.caption}
+          <div class="stl-caption">
             {post.caption}
           </div>
         {/if}
@@ -387,20 +600,6 @@
               Map
             </button>
           {/if}
-
-          <button
-            class="stl-open-btn"
-            onclick={() => onOpenPost(post)}
-            aria-label="View post"
-            id="view-{post.id}"
-          >
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-              <polyline points="15 3 21 3 21 9"/>
-              <line x1="10" y1="14" x2="21" y2="3"/>
-            </svg>
-            View
-          </button>
         </div>
 
         <!-- Comments -->
@@ -557,14 +756,60 @@
     white-space: nowrap;
   }
 
+  .stl-head-actions {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .stl-menu-btn {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    transition: background 0.18s, color 0.18s, transform 0.15s;
+    cursor: pointer;
+  }
+
+  .stl-menu-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+  }
+
+  .stl-menu-btn:active {
+    transform: scale(0.92);
+  }
+
   .stl-media-wrap {
     position: relative;
     width: 100%;
     aspect-ratio: 1 / 1;
     overflow: hidden;
-    cursor: pointer;
     background: var(--surface);
     outline: none;
+    touch-action: pan-y;
+  }
+
+  .stl-strip {
+    display: flex;
+    height: 100%;
+    width: 100%;
+    transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  }
+
+  .stl-slide {
+    position: relative;
+    flex: 0 0 100%;
+    height: 100%;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
   }
 
   .stl-media {
@@ -572,37 +817,128 @@
     height: 100%;
     object-fit: cover;
     display: block;
-    transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
-    will-change: transform;
+    user-select: none;
+    -webkit-user-drag: none;
   }
 
-  .stl-media-wrap:hover .stl-media,
-  .stl-media-wrap:focus-visible .stl-media {
-    transform: scale(1.025);
-  }
-
-  .stl-media-video-thumb {
+  .stl-video-container {
     position: relative;
     width: 100%;
     height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
   }
 
-  .stl-media-video-thumb video {
+  .stl-video-container video {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    display: block;
+    background: #000;
   }
 
   .stl-play-badge {
     position: absolute;
-    inset: 0;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(14, 14, 18, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #fff;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0,0,0,0.3);
+    pointer-events: none;
+    z-index: 5;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    animation: stl-badge-pop 0.22s cubic-bezier(0.18, 0.89, 0.32, 1.28) both;
   }
 
-  .stl-play-badge svg { color: #fff; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5)); }
+  .stl-play-badge svg {
+    margin-left: 3px; /* visual center for play triangle */
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5));
+  }
+
+  @keyframes stl-badge-pop {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.65); }
+    100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
+
+  .stl-media-nav {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    pointer-events: none;
+  }
+
+  .stl-btn-nav {
+    pointer-events: auto;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(14, 14, 18, 0.65);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #fff;
+    transition: background 0.18s, opacity 0.18s, transform 0.15s;
+    cursor: pointer;
+  }
+
+  .stl-btn-nav:hover {
+    background: rgba(14, 14, 18, 0.85);
+    transform: scale(1.06);
+  }
+
+  .stl-btn-nav:active {
+    transform: scale(0.92);
+  }
+
+  .stl-btn-nav:disabled {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .stl-dots {
+    position: absolute;
+    bottom: 10px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .stl-dots button {
+    pointer-events: auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.38);
+    transition: background 0.2s, transform 0.2s;
+    cursor: pointer;
+  }
+
+  .stl-dots button.active {
+    background: var(--accent);
+    transform: scale(1.3);
+  }
 
   .stl-media-count {
     position: absolute;
@@ -646,14 +982,17 @@
     line-height: 1.45;
     color: var(--text);
     word-break: break-word;
-    cursor: pointer;
-    outline: none;
   }
 
-  .stl-caption-author {
-    font-weight: 700;
-    margin-right: 2px;
-    color: var(--text);
+  .stl-edit-form {
+    padding: 10px 16px 4px;
+  }
+
+  .stl-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 10px;
   }
 
   .stl-actions {
@@ -713,8 +1052,7 @@
 
   .stl-action-btn.stl-liked .stl-heart-icon { transform: scale(1.18); }
 
-  .stl-map-btn,
-  .stl-open-btn {
+  .stl-map-btn {
     display: inline-flex;
     align-items: center;
     gap: 5px;
@@ -727,9 +1065,6 @@
     transition: color 0.18s, background 0.18s, transform 0.18s;
     letter-spacing: 0.02em;
     box-sizing: border-box;
-  }
-
-  .stl-map-btn {
     color: var(--accent);
     border: 1px solid rgba(217, 160, 102, 0.28);
     background: rgba(217, 160, 102, 0.08);
@@ -737,15 +1072,7 @@
   }
 
   .stl-map-btn:hover { background: rgba(217, 160, 102, 0.16); border-color: var(--accent); }
-  .stl-map-btn:active, .stl-open-btn:active { transform: scale(0.93); }
-
-  .stl-open-btn {
-    color: var(--muted);
-    border: 1px solid rgba(255,255,255,0.1);
-    background: rgba(255,255,255,0.04);
-  }
-
-  .stl-open-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+  .stl-map-btn:active { transform: scale(0.93); }
 
   .stl-comments-wrap {
     border-top: 1px solid rgba(255,255,255,0.05);
