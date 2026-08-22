@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 8788",
     "build": "vite build",
-    "start": "bun ./build/index.js",
+    "start": "BODY_SIZE_LIMIT=100M bun ./build/index.js",
     "preview": "vite preview --host 0.0.0.0 --port 8788",
     "dev:worker": "vite build && wrangler pages dev build --ip 0.0.0.0 --port 8788",
     "check": "svelte-check --tsconfig ./tsconfig.json"

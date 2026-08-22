@@ -4,7 +4,6 @@ import type { Config } from '@sveltejs/kit';
 const config: Config = {
   kit: {
     adapter: adapter(),
-    bodySizeLimit: '100mb',
   },
 };
 
